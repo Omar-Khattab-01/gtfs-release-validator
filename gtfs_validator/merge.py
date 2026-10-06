@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import difflib
 import hashlib
 import io
 import math
@@ -46,6 +47,7 @@ class TripSummary:
     last_time: str
     shape_id: str
     stop_count: int
+    stop_sequence: tuple[str, ...]
     stop_fingerprint: str
     schedule_fingerprint: str
 
@@ -266,6 +268,7 @@ def _trip_summaries(
             last_time=last[2] or last[3],
             shape_id=meta.get("shape_id", ""),
             stop_count=len(current_rows),
+            stop_sequence=tuple(row[1] for row in current_rows),
             stop_fingerprint=stops_digest.hexdigest(),
             schedule_fingerprint=schedule_digest.hexdigest(),
         )
@@ -341,6 +344,95 @@ def _hastus_stop_translation(
         elif final and hastus_id in final_ids:
             translation[hastus_id] = hastus_id
     return translation
+
+
+def _sequence_difference_count(first: tuple[str, ...], second: tuple[str, ...]) -> int:
+    matcher = difflib.SequenceMatcher(a=first, b=second, autojunk=False)
+    return sum(max(left_end - left_start, right_end - right_start) for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes() if tag != "equal")
+
+
+def _variation_similarity(first: dict[str, object], second: dict[str, object]) -> tuple[float, float]:
+    first_sequence = tuple(first.get("_stop_sequence", ()))
+    second_sequence = tuple(second.get("_stop_sequence", ()))
+    sequence_ratio = difflib.SequenceMatcher(a=first_sequence, b=second_sequence, autojunk=False).ratio()
+    first_headsign = " ".join(str(value) for value in first.get("headsigns", []))
+    second_headsign = " ".join(str(value) for value in second.get("headsigns", []))
+    headsign_ratio = difflib.SequenceMatcher(a=first_headsign, b=second_headsign, autojunk=False).ratio()
+    endpoints = 0.0
+    if first_sequence and second_sequence:
+        endpoints = (float(first_sequence[0] == second_sequence[0]) + float(first_sequence[-1] == second_sequence[-1])) / 2
+    count_ratio = min(len(first_sequence), len(second_sequence)) / max(len(first_sequence), len(second_sequence), 1)
+    return sequence_ratio, 0.82 * sequence_ratio + 0.08 * endpoints + 0.06 * headsign_ratio + 0.04 * count_ratio
+
+
+def _pair_route_variations(
+    cad_variations: list[dict[str, object]],
+    hastus_variations: list[dict[str, object]],
+    journey_links: dict[tuple[str, str], int],
+) -> list[dict[str, object]]:
+    """Pair patterns independently from exact trip times and headsign text."""
+    candidates: list[tuple[float, float, int, dict[str, object], dict[str, object], str]] = []
+    for cad_item in cad_variations:
+        cad_directions = set(cad_item.get("direction_ids", []))
+        for hastus_item in hastus_variations:
+            hastus_directions = set(hastus_item.get("direction_ids", []))
+            if cad_directions and hastus_directions and cad_directions.isdisjoint(hastus_directions):
+                continue
+            sequence_ratio, score = _variation_similarity(cad_item, hastus_item)
+            linked_journeys = journey_links.get((str(cad_item["variation_id"]), str(hastus_item["variation_id"])), 0)
+            exact = cad_item["pattern_fingerprint"] == hastus_item["pattern_fingerprint"]
+            if not exact and not linked_journeys and sequence_ratio < 0.70:
+                continue
+            evidence = "exact stop sequence" if exact else ("matching scheduled journey" if linked_journeys else "similar stop sequence")
+            priority = 3.0 if exact else (2.0 + min(linked_journeys, 50) / 1000 if linked_journeys else score)
+            candidates.append((priority, score, linked_journeys, cad_item, hastus_item, evidence))
+
+    candidates.sort(key=lambda item: (-item[0], -item[1], str(item[3]["variation_id"]), str(item[4]["variation_id"])))
+    paired_cad: set[str] = set()
+    paired_hastus: set[str] = set()
+    pairs: list[dict[str, object]] = []
+    for _priority, score, linked_journeys, cad_item, hastus_item, evidence in candidates:
+        cad_id = str(cad_item["variation_id"])
+        hastus_id = str(hastus_item["variation_id"])
+        if cad_id in paired_cad or hastus_id in paired_hastus:
+            continue
+        first_sequence = tuple(cad_item.get("_stop_sequence", ()))
+        second_sequence = tuple(hastus_item.get("_stop_sequence", ()))
+        difference_count = _sequence_difference_count(first_sequence, second_sequence)
+        competing = [
+            candidate for candidate in candidates
+            if candidate[3] is cad_item and candidate[4] is not hastus_item and candidate[3]["variation_id"] not in paired_cad and candidate[4]["variation_id"] not in paired_hastus
+        ] + [
+            candidate for candidate in candidates
+            if candidate[4] is hastus_item and candidate[3] is not cad_item and candidate[3]["variation_id"] not in paired_cad and candidate[4]["variation_id"] not in paired_hastus
+        ]
+        ambiguous = difference_count > 0 and any(abs(score - candidate[1]) <= 0.015 for candidate in competing)
+        status = "matching" if difference_count == 0 else ("ambiguous" if ambiguous else "issues")
+        pairs.append(
+            {
+                "pair_id": f"{cad_id}|{hastus_id}",
+                "status": status,
+                "clevercad_variation_id": cad_id,
+                "hastus_variation_id": hastus_id,
+                "similarity_percent": round(score * 100, 1),
+                "difference_count": difference_count,
+                "linked_journeys": linked_journeys,
+                "reason": "multiple similarly strong candidates" if ambiguous else evidence,
+            }
+        )
+        paired_cad.add(cad_id)
+        paired_hastus.add(hastus_id)
+
+    for item in cad_variations:
+        variation_id = str(item["variation_id"])
+        if variation_id not in paired_cad:
+            pairs.append({"pair_id": f"{variation_id}|", "status": "not_comparable", "clevercad_variation_id": variation_id, "hastus_variation_id": "", "similarity_percent": None, "difference_count": None, "linked_journeys": 0, "reason": "no sufficiently similar HASTUS pattern in the same direction"})
+    for item in hastus_variations:
+        variation_id = str(item["variation_id"])
+        if variation_id not in paired_hastus:
+            pairs.append({"pair_id": f"|{variation_id}", "status": "not_comparable", "clevercad_variation_id": "", "hastus_variation_id": variation_id, "similarity_percent": None, "difference_count": None, "linked_journeys": 0, "reason": "no sufficiently similar CleverCAD pattern in the same direction"})
+    order = {"issues": 0, "ambiguous": 1, "matching": 2, "not_comparable": 3}
+    return sorted(pairs, key=lambda item: (order[str(item["status"])], str(item["pair_id"])))
 
 
 def _audit_trip_patterns(
@@ -422,6 +514,7 @@ def _audit_trip_patterns(
                     {
                         "variation_id": variation_id,
                         "pattern_fingerprint": fingerprint,
+                        "_stop_sequence": trips[0].stop_sequence,
                         "example_trip_id": example.trip_id,
                         "stop_count": trips[0].stop_count,
                         "trip_count": len(trips),
@@ -447,6 +540,7 @@ def _audit_trip_patterns(
     }
     disagreement_count = 0
     disagreements_by_route: dict[str, int] = defaultdict(int)
+    journey_pair_counts: dict[str, dict[tuple[str, str], int]] = defaultdict(lambda: defaultdict(int))
     common_journeys = set(cad_journeys) & set(hastus_journeys)
     for journey_key in sorted(common_journeys):
         route_name = journey_key[0]
@@ -462,6 +556,9 @@ def _audit_trip_patterns(
             catalog_entries[("HASTUS", route_name, variation_id)]["comparable_journeys"] += 1
         cad_patterns = {item.stop_fingerprint for item in cad_journeys[journey_key]}
         hastus_patterns = {item.stop_fingerprint for item in hastus_journeys[journey_key]}
+        for cad_variation_id in cad_variation_ids:
+            for hastus_variation_id in hastus_variation_ids:
+                journey_pair_counts[route_name][(cad_variation_id, hastus_variation_id)] += 1
         if cad_patterns & hastus_patterns:
             continue
         disagreement_count += 1
@@ -520,16 +617,54 @@ def _audit_trip_patterns(
         matches = compared - mismatches
         cad_variations = cad_catalog.get(route_name, [])
         hastus_variations = hastus_catalog.get(route_name, [])
-        comparable_cad = [item for item in cad_variations if item["comparable_journeys"]]
-        comparable_hastus = [item for item in hastus_variations if item["comparable_journeys"]]
-        affected_cad = [item for item in comparable_cad if item["has_problem"]]
-        affected_hastus = [item for item in comparable_hastus if item["has_problem"]]
-        if not mismatches:
+        variation_pairs = _pair_route_variations(cad_variations, hastus_variations, journey_pair_counts.get(route_name, {}))
+        cad_by_variation = {str(item["variation_id"]): item for item in cad_variations}
+        hastus_by_variation = {str(item["variation_id"]): item for item in hastus_variations}
+        paired = [item for item in variation_pairs if item["status"] != "not_comparable"]
+        affected_pairs = [item for item in paired if item["status"] == "issues"]
+        ambiguous_pairs = [item for item in paired if item["status"] == "ambiguous"]
+        unpaired_pairs = [item for item in variation_pairs if item["status"] == "not_comparable"]
+        for pair in affected_pairs:
+            cad_item = cad_by_variation[str(pair["clevercad_variation_id"])]
+            hastus_item = hastus_by_variation[str(pair["hastus_variation_id"])]
+            cad_item["has_problem"] = True
+            hastus_item["has_problem"] = True
+            report.add(
+                "TRP103",
+                "warning",
+                "Trip reconciliation",
+                "CleverCAD and HASTUS route variations disagree",
+                "The most likely patterns for this route and direction have different translated stop sequences.",
+                file="CleverCAD/HASTUS:stop_times.txt",
+                key=f"{route_name} | {cad_item['variation_id']} | {hastus_item['variation_id']}",
+                observed=f"CAD {cad_item['example_trip_id']}: {cad_item['stop_count']} stops",
+                expected=f"HASTUS {hastus_item['example_trip_id']}: {hastus_item['stop_count']} stops",
+                context={
+                    "clevercad_trip_id": cad_item["example_trip_id"],
+                    "hastus_trip_id": hastus_item["example_trip_id"],
+                    "route_short_name": route_name,
+                    "clevercad_variation_id": cad_item["variation_id"],
+                    "hastus_variation_id": hastus_item["variation_id"],
+                    "clevercad_shape_id": ", ".join(str(value) for value in cad_item["shape_ids"]),
+                    "hastus_shape_id": ", ".join(str(value) for value in hastus_item["shape_ids"]),
+                    "similarity_percent": pair["similarity_percent"],
+                    "difference_count": pair["difference_count"],
+                    "pairing_reason": pair["reason"],
+                },
+            )
+        comparable_cad_ids = {str(item["clevercad_variation_id"]) for item in paired}
+        comparable_hastus_ids = {str(item["hastus_variation_id"]) for item in paired}
+        affected_cad = [item for item in cad_variations if item["has_problem"]]
+        affected_hastus = [item for item in hastus_variations if item["has_problem"]]
+        if not affected_pairs:
             variation_scope = "none"
-        elif affected_cad and affected_hastus and len(affected_cad) == len(comparable_cad) and len(affected_hastus) == len(comparable_hastus):
+        elif len(affected_pairs) == len(paired):
             variation_scope = "all_comparable_variations"
         else:
             variation_scope = "specific_variations"
+        route_status = "not_comparable" if not paired else ("issues" if affected_pairs or unpaired_pairs else ("ambiguous" if ambiguous_pairs else "healthy"))
+        public_cad_variations = [{key: value for key, value in item.items() if not key.startswith("_")} for item in cad_variations]
+        public_hastus_variations = [{key: value for key, value in item.items() if not key.startswith("_")} for item in hastus_variations]
         route_health.append(
             {
                 "route_short_name": route_name,
@@ -539,16 +674,21 @@ def _audit_trip_patterns(
                 "matching_journeys": matches,
                 "mismatch_journeys": mismatches,
                 "match_percent": round(matches * 100 / compared, 1) if compared else None,
-                "status": "issues" if mismatches else ("healthy" if compared else "not_comparable"),
+                "status": route_status,
                 "clevercad_variation_count": len(cad_variations),
                 "hastus_variation_count": len(hastus_variations),
-                "comparable_clevercad_variations": len(comparable_cad),
-                "comparable_hastus_variations": len(comparable_hastus),
+                "comparable_clevercad_variations": len(comparable_cad_ids),
+                "comparable_hastus_variations": len(comparable_hastus_ids),
                 "affected_clevercad_variations": len(affected_cad),
                 "affected_hastus_variations": len(affected_hastus),
+                "paired_variation_count": len(paired),
+                "mismatch_variation_count": len(affected_pairs),
+                "ambiguous_variation_count": len(ambiguous_pairs),
+                "unpaired_variation_count": len(unpaired_pairs),
                 "variation_scope": variation_scope,
-                "clevercad_variations": cad_variations,
-                "hastus_variations": hastus_variations,
+                "variation_pairs": variation_pairs,
+                "clevercad_variations": public_cad_variations,
+                "hastus_variations": public_hastus_variations,
             }
         )
 
@@ -589,6 +729,7 @@ def _audit_stops(
         )
 
     hastus_to_final = _hastus_stop_translation(cad, hastus, final)
+    mapping_issues: list[dict[str, object]] = []
 
     if final:
         for stop_id, cad_stop in sorted(cad_by_id.items()):
@@ -643,9 +784,11 @@ def _audit_stops(
         sources = [row for row in (cad_stop, hastus_stop) if row]
 
         if cad_stop:
+            differences: list[dict[str, object]] = []
             cad_name = _normalize_name(cad_stop.get("stop_name", ""))
             hastus_name = _normalize_name(hastus_stop.get("stop_name", ""))
             if cad_name and hastus_name and cad_name != hastus_name:
+                differences.append({"field": "stop_name", "clevercad": cad_stop.get("stop_name", ""), "hastus": hastus_stop.get("stop_name", "")})
                 report.add(
                     "STP005",
                     "warning",
@@ -662,6 +805,7 @@ def _audit_stops(
                 )
             distance = _distance_m(cad_stop, hastus_stop)
             if distance is not None and distance > 35:
+                differences.append({"field": "coordinates", "clevercad": f"{cad_stop.get('stop_lat', '')}, {cad_stop.get('stop_lon', '')}", "hastus": f"{hastus_stop.get('stop_lat', '')}, {hastus_stop.get('stop_lon', '')}", "distance_m": round(distance, 1)})
                 report.add(
                     "STP006",
                     "warning",
@@ -677,6 +821,48 @@ def _audit_stops(
                         "hastus_stop_id": hastus_id,
                         "distance_m": round(distance, 1),
                     },
+                )
+            metadata_differences: list[dict[str, object]] = []
+            for column in ("location_type", "wheelchair_boarding", "platform_code", "zone_id", "stop_desc"):
+                cad_value = cad_stop.get(column, "").strip()
+                hastus_value = hastus_stop.get(column, "").strip()
+                cad_comparable = cad_value or ("0" if column in {"location_type", "wheelchair_boarding"} else "")
+                hastus_comparable = hastus_value or ("0" if column in {"location_type", "wheelchair_boarding"} else "")
+                if (cad_comparable or hastus_comparable) and _normalize_name(cad_comparable) != _normalize_name(hastus_comparable):
+                    metadata_differences.append({"field": column, "clevercad": cad_value, "hastus": hastus_value})
+            cad_parent = cad_stop.get("parent_station", "").strip()
+            hastus_parent_source = hastus_stop.get("parent_station", "").strip()
+            hastus_parent = hastus_to_final.get(hastus_parent_source, hastus_parent_source)
+            if (cad_parent or hastus_parent) and cad_parent != hastus_parent:
+                metadata_differences.append({"field": "parent_station", "clevercad": cad_parent, "hastus": hastus_parent_source, "hastus_mapped": hastus_parent})
+            if metadata_differences:
+                differences.extend(metadata_differences)
+                fields = ", ".join(str(item["field"]) for item in metadata_differences)
+                report.add(
+                    "STP010",
+                    "warning",
+                    "Stop reconciliation",
+                    "Mapped source stop attributes disagree",
+                    f"The mapped CleverCAD and HASTUS stops differ in: {fields}.",
+                    file="CleverCAD/HASTUS:stops.txt",
+                    key=f"{final_id} ↔ {hastus_id}",
+                    observed=" | ".join(f"{item['field']}: {item['clevercad'] or 'blank'}" for item in metadata_differences),
+                    expected=" | ".join(f"{item['field']}: {item['hastus'] or 'blank'}" for item in metadata_differences),
+                    context={"clevercad_stop_id": final_id, "hastus_stop_id": hastus_id, "fields": [item["field"] for item in metadata_differences]},
+                )
+            if differences:
+                mapping_issues.append(
+                    {
+                        "clevercad_stop_id": final_id,
+                        "hastus_stop_id": hastus_id,
+                        "clevercad_stop_name": cad_stop.get("stop_name", ""),
+                        "hastus_stop_name": hastus_stop.get("stop_name", ""),
+                        "distance_m": round(distance, 1) if distance is not None else None,
+                        "difference_fields": [str(item["field"]) for item in differences],
+                        "differences": differences,
+                        "clevercad": cad_stop,
+                        "hastus": hastus_stop,
+                    }
                 )
 
         if final_stop is None:
@@ -731,7 +917,9 @@ def _audit_stops(
         "clevercad_stops": len(cad_by_id),
         "hastus_stops": len(hastus_by_id),
         "source_stop_mappings": len(hastus_to_final),
+        "mapped_stop_mismatches": len(mapping_issues),
         "ambiguous_operational_codes": len(ambiguous_codes),
+        "mapping_issues": mapping_issues,
     }
     if final:
         report.stats["stop_crosswalk"]["final_stops"] = len(final_by_id)

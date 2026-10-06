@@ -59,12 +59,17 @@
 
       <div class="metric-grid" id="metrics"></div>
 
-      <section class="panel route-panel">
+      <nav class="workspace-tabs" aria-label="Audit views">
+        <button type="button" class="workspace-tab active" data-view="routes" aria-selected="true">Route variations</button>
+        <button type="button" class="workspace-tab" data-view="stops" aria-selected="false">Stop mapping &amp; mismatches</button>
+      </nav>
+
+      <section class="panel route-panel" id="route-view">
         <div class="section-heading compact">
           <div><span class="step">02</span><h3>Route health</h3></div>
           <div class="route-heading-actions"><span class="quiet" id="route-summary">Select a route to isolate its trip findings</span><label>Sort routes<select id="route-sort"><option value="number">Route number</option><option value="attention">Needs attention</option><option value="variations">Most variations</option></select></label></div>
         </div>
-        <div class="route-legend"><span><i class="route-dot healthy"></i>All compared journeys match</span><span><i class="route-dot issues"></i>Pattern mismatches found</span><span><i class="route-dot not-comparable"></i>No equivalent journeys compared</span></div>
+        <div class="route-legend"><span><i class="route-dot healthy"></i>All paired patterns match</span><span><i class="route-dot issues"></i>Pattern mismatches found</span><span><i class="route-dot ambiguous"></i>Pairing needs review</span><span><i class="route-dot not-comparable"></i>Source-only</span></div>
         <div class="route-grid" id="route-grid"></div>
         <div class="active-route hidden" id="active-route"><span id="active-route-label"></span><button type="button" class="text-button" id="clear-route">Show all routes</button></div>
         <section class="variation-panel hidden" id="variation-panel" aria-labelledby="variation-title">
@@ -75,6 +80,21 @@
           <div class="variation-tab-groups" id="variation-tabs"></div>
           <div class="variation-detail" id="variation-detail"><p class="variation-prompt">Choose a variation tab to compare its representative CleverCAD and HASTUS stop patterns.</p></div>
         </section>
+      </section>
+
+      <section class="panel stop-mapping-panel hidden" id="stop-view">
+        <div class="section-heading compact">
+          <div><span class="step">02B</span><h3>Stop mapping &amp; mismatches</h3></div>
+          <span class="quiet" id="stop-mapping-summary">Mapped stop attributes across both exports</span>
+        </div>
+        <div class="stop-mapping-toolbar">
+          <label><span>Search mapped stops</span><input id="stop-mapping-search" type="search" placeholder="Stop ID, name, or field…"></label>
+          <label><span>Difference type</span><select id="stop-mapping-filter"><option value="">All differences</option><option value="stop_name">Stop name</option><option value="coordinates">Coordinates</option><option value="wheelchair_boarding">Accessibility</option><option value="platform_code">Platform</option><option value="parent_station">Parent station</option><option value="zone_id">Zone</option><option value="location_type">Location type</option><option value="stop_desc">Description</option></select></label>
+          <button type="button" class="button secondary" id="export-stop-mapping">Export mismatches</button>
+        </div>
+        <div class="stop-mapping-list" id="stop-mapping-list"></div>
+        <div class="empty hidden" id="stop-mapping-empty">No mapped stops match these filters.</div>
+        <div class="load-more-wrap"><button type="button" class="button secondary hidden" id="stop-mapping-more">Show more stops</button></div>
       </section>
 
       <section class="panel">
@@ -121,7 +141,7 @@
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
-  <footer><span>GTFS Merge Auditor 0.6</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.7</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

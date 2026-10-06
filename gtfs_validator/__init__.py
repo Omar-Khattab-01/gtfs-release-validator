@@ -4,4 +4,4 @@ from .engine import validate_feed
 from .merge import validate_exports, validate_merge
 
 __all__ = ["validate_exports", "validate_feed", "validate_merge"]
-__version__ = "0.6.0"
+__version__ = "0.7.0"

@@ -187,6 +187,41 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual(1, route["affected_clevercad_variations"])
             self.assertEqual("specific_variations", route["variation_scope"])
 
+    def test_variations_pair_when_an_extra_first_stop_changes_start_time(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            routes = "route_id,agency_id,route_short_name,route_long_name,route_type\nr697,OCT,697,Conroy,3\n"
+            trips = "route_id,service_id,trip_id,trip_headsign,direction_id,shape_id\nr697,WKD,t697,Conroy,0,shape697\n"
+            cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\n1,HX,EXTRA,45.0,-75.0\n2,HA,A,45.1,-75.1\n3,HB,B,45.2,-75.2\n"
+            hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\nHA,2,A,45.1,-75.1\nHB,3,B,45.2,-75.2\n"
+            cad_times = "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nt697,15:12:00,15:12:00,1,1\nt697,15:19:00,15:19:00,2,2\nt697,15:48:00,15:48:00,3,3\n"
+            hastus_times = "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nt697,15:19:00,15:19:00,HA,1\nt697,15:48:00,15:48:00,HB,2\n"
+            write_feed(cad_path, extra={"routes.txt": routes, "trips.txt": trips, "stops.txt": cad_stops, "stop_times.txt": cad_times})
+            write_feed(hastus_path, extra={"routes.txt": routes, "trips.txt": trips, "stops.txt": hastus_stops, "stop_times.txt": hastus_times})
+            report = validate_exports(cad_path, hastus_path)
+            route = next(item for item in report.stats["trip_reconciliation"]["route_health"] if item["route_short_name"] == "697")
+            self.assertEqual(0, route["compared_journeys"])
+            self.assertEqual("issues", route["status"])
+            self.assertEqual(1, route["mismatch_variation_count"])
+            self.assertEqual("issues", route["variation_pairs"][0]["status"])
+            self.assertEqual(1, route["variation_pairs"][0]["difference_count"])
+            self.assertTrue(any(item.rule_id == "TRP103" for item in report.findings))
+
+    def test_stop_mapping_catalog_includes_attribute_differences(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon,wheelchair_boarding,platform_code\n100,HA,MAIN,45.1,-75.1,1,A\n"
+            hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon,wheelchair_boarding,platform_code\nHA,100,MAIN,45.1,-75.1,2,B\n"
+            write_feed(cad_path, extra={"stops.txt": cad_stops})
+            write_feed(hastus_path, extra={"stops.txt": hastus_stops})
+            report = validate_exports(cad_path, hastus_path)
+            crosswalk = report.stats["stop_crosswalk"]
+            self.assertEqual(1, crosswalk["mapped_stop_mismatches"])
+            self.assertEqual({"wheelchair_boarding", "platform_code"}, set(crosswalk["mapping_issues"][0]["difference_fields"]))
+            self.assertTrue(any(item.rule_id == "STP010" for item in report.findings))
+
 
 if __name__ == "__main__":
     unittest.main()
