@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OC Transpo GTFS Release Validator</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand-mark" aria-hidden="true"><span>OC</span></div>
+    <div>
+      <p class="eyebrow">Release assurance · local device</p>
+      <h1>GTFS Release Validator</h1>
+    </div>
+    <div class="privacy-badge"><span class="status-dot"></span> Offline processing</div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="kicker">Pre-publication control</p>
+        <h2>Validate the artifact riders will actually receive.</h2>
+        <p class="lede">Inspect GTFS structure, relationships, schedules, OC Transpo rules, and ZIP permissions without sending the feed anywhere.</p>
+      </div>
+      <div class="scope-card">
+        <span>Phase 1 scope</span>
+        <strong>Final feed certification</strong>
+        <small>Baseline and source reconciliation are next.</small>
+      </div>
+    </section>
+
+    <section class="panel setup-panel" id="setup-panel">
+      <div class="section-heading">
+        <div><span class="step">01</span><h3>Select candidate</h3></div>
+        <span class="quiet">ZIP remains read-only</span>
+      </div>
+      <form id="run-form">
+        <label for="candidate-path">Candidate GTFS ZIP path</label>
+        <div class="path-row">
+          <input id="candidate-path" name="candidate_path" type="text" required autocomplete="off" spellcheck="false" placeholder="/path/to/GTFSExport.zip">
+          <button type="submit" id="run-button">Run validation</button>
+        </div>
+        <p class="field-help">Paste the full local path. Browser file uploads are intentionally avoided so multi-gigabyte feeds are never copied into memory.</p>
+      </form>
+    </section>
+
+    <section class="running panel hidden" id="running-panel" aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <div><strong>Validation in progress</strong><p>Checking the archive, tables, relationships, and scheduled stop sequences.</p></div>
+    </section>
+
+    <section id="results" class="hidden">
+      <div class="decision-strip" id="decision-strip">
+        <div><p class="eyebrow">Release decision</p><h2 id="decision">—</h2></div>
+        <div class="run-meta"><span id="source-name"></span><code id="hash"></code></div>
+      </div>
+
+      <div class="metric-grid" id="metrics"></div>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div><span class="step">02</span><h3>Findings</h3></div>
+          <div class="actions"><a id="csv-link" class="button secondary">Export CSV</a><a id="json-link" class="button secondary">Export JSON</a></div>
+        </div>
+        <div class="toolbar">
+          <label class="search"><span>Search</span><input id="search" type="search" placeholder="Rule, file, trip, message…"></label>
+          <label><span>Severity</span><select id="severity-filter"><option value="">All severities</option><option>blocker</option><option>error</option><option>warning</option><option>info</option></select></label>
+          <label><span>Category</span><select id="category-filter"><option value="">All categories</option></select></label>
+          <span class="result-count" id="result-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Severity</th><th>Rule</th><th>Finding</th><th>Location</th><th>Evidence</th></tr></thead>
+            <tbody id="findings-body"></tbody>
+          </table>
+        </div>
+        <div class="empty hidden" id="empty-state">No findings match these filters.</div>
+      </section>
+
+      <section class="lower-grid">
+        <div class="panel">
+          <div class="section-heading compact"><div><span class="step">03</span><h3>Feed inventory</h3></div></div>
+          <div id="inventory" class="inventory"></div>
+        </div>
+        <div class="panel">
+          <div class="section-heading compact"><div><span class="step">04</span><h3>Packaging</h3></div></div>
+          <div id="packaging" class="packaging"></div>
+        </div>
+      </section>
+    </section>
+  </main>
+  <footer><span>GTFS Validator 0.1</span><span>Bound to localhost · no network services</span></footer>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
