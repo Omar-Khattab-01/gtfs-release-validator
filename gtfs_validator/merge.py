@@ -44,6 +44,7 @@ class TripSummary:
     headsign: str
     first_time: str
     last_time: str
+    shape_id: str
     stop_count: int
     stop_fingerprint: str
     schedule_fingerprint: str
@@ -245,8 +246,10 @@ def _trip_summaries(
         current_rows.sort(key=lambda item: item[0])
         stops_digest = hashlib.sha256()
         schedule_digest = hashlib.sha256()
-        for sequence, stop_id, arrival, departure, pickup, dropoff in current_rows:
-            stops_digest.update(f"{sequence}|{stop_id}\n".encode())
+        for position, (sequence, stop_id, arrival, departure, pickup, dropoff) in enumerate(current_rows, start=1):
+            # A variation is the ordered translated stop pattern. Source exports
+            # may number the same sequence differently, so use list position.
+            stops_digest.update(f"{position}|{stop_id}\n".encode())
             schedule_digest.update(
                 f"{sequence}|{stop_id}|{arrival}|{departure}|{pickup}|{dropoff}\n".encode()
             )
@@ -261,6 +264,7 @@ def _trip_summaries(
             headsign=_normalize_name(meta.get("trip_headsign", "")),
             first_time=first[3] or first[2],
             last_time=last[2] or last[3],
+            shape_id=meta.get("shape_id", ""),
             stop_count=len(current_rows),
             stop_fingerprint=stops_digest.hexdigest(),
             schedule_fingerprint=schedule_digest.hexdigest(),
@@ -387,19 +391,91 @@ def _audit_trip_patterns(
                 grouped[summary.journey_key].append(summary)
         return dict(grouped)
 
+    def variation_catalog(
+        summaries: dict[str, list[TripSummary]],
+        prefix: str,
+    ) -> tuple[dict[str, list[dict[str, object]]], dict[tuple[str, str], str]]:
+        grouped: dict[tuple[str, str], list[TripSummary]] = defaultdict(list)
+        for variants in summaries.values():
+            for summary in variants:
+                grouped[(summary.route_short_name, summary.stop_fingerprint)].append(summary)
+        by_route: dict[str, list[dict[str, object]]] = defaultdict(list)
+        lookup: dict[tuple[str, str], str] = {}
+        grouped_by_route: dict[str, list[tuple[str, list[TripSummary]]]] = defaultdict(list)
+        for (route_name, fingerprint), trips in grouped.items():
+            grouped_by_route[route_name].append((fingerprint, trips))
+        for route_name, patterns in grouped_by_route.items():
+            patterns.sort(
+                key=lambda item: (
+                    item[1][0].direction_id,
+                    item[1][0].headsign,
+                    item[1][0].stop_count,
+                    item[1][0].first_time,
+                    item[0],
+                )
+            )
+            for number, (fingerprint, trips) in enumerate(patterns, start=1):
+                variation_id = f"{prefix} V{number}"
+                lookup[(route_name, fingerprint)] = variation_id
+                by_route[route_name].append(
+                    {
+                        "variation_id": variation_id,
+                        "pattern_fingerprint": fingerprint[:16],
+                        "stop_count": trips[0].stop_count,
+                        "trip_count": len(trips),
+                        "shape_ids": sorted({trip.shape_id for trip in trips if trip.shape_id}),
+                        "direction_ids": sorted({trip.direction_id for trip in trips if trip.direction_id}),
+                        "headsigns": sorted({trip.headsign for trip in trips if trip.headsign}),
+                        "first_time": min((trip.first_time for trip in trips if trip.first_time), default=""),
+                        "last_time": max((trip.last_time for trip in trips if trip.last_time), default=""),
+                        "comparable_journeys": 0,
+                        "affected_journeys": 0,
+                        "has_problem": False,
+                    }
+                )
+        return dict(by_route), lookup
+
     cad_journeys = by_journey(cad_summaries)
     hastus_journeys = by_journey(hastus_summaries)
+    cad_catalog, cad_variation_lookup = variation_catalog(cad_summaries, "CAD")
+    hastus_catalog, hastus_variation_lookup = variation_catalog(hastus_summaries, "HASTUS")
+    catalog_entries = {
+        **{("CAD", route, item["variation_id"]): item for route, items in cad_catalog.items() for item in items},
+        **{("HASTUS", route, item["variation_id"]): item for route, items in hastus_catalog.items() for item in items},
+    }
     disagreement_count = 0
     disagreements_by_route: dict[str, int] = defaultdict(int)
-    for journey_key in sorted(set(cad_journeys) & set(hastus_journeys)):
+    common_journeys = set(cad_journeys) & set(hastus_journeys)
+    for journey_key in sorted(common_journeys):
+        route_name = journey_key[0]
+        cad_variation_ids = {
+            cad_variation_lookup[(route_name, item.stop_fingerprint)] for item in cad_journeys[journey_key]
+        }
+        hastus_variation_ids = {
+            hastus_variation_lookup[(route_name, item.stop_fingerprint)] for item in hastus_journeys[journey_key]
+        }
+        for variation_id in cad_variation_ids:
+            catalog_entries[("CAD", route_name, variation_id)]["comparable_journeys"] += 1
+        for variation_id in hastus_variation_ids:
+            catalog_entries[("HASTUS", route_name, variation_id)]["comparable_journeys"] += 1
         cad_patterns = {item.stop_fingerprint for item in cad_journeys[journey_key]}
         hastus_patterns = {item.stop_fingerprint for item in hastus_journeys[journey_key]}
         if cad_patterns & hastus_patterns:
             continue
         disagreement_count += 1
-        disagreements_by_route[journey_key[0]] += 1
+        disagreements_by_route[route_name] += 1
+        for variation_id in cad_variation_ids:
+            entry = catalog_entries[("CAD", route_name, variation_id)]
+            entry["affected_journeys"] += 1
+            entry["has_problem"] = True
+        for variation_id in hastus_variation_ids:
+            entry = catalog_entries[("HASTUS", route_name, variation_id)]
+            entry["affected_journeys"] += 1
+            entry["has_problem"] = True
         cad_example = cad_journeys[journey_key][0]
         hastus_example = hastus_journeys[journey_key][0]
+        cad_variation_id = cad_variation_lookup[(route_name, cad_example.stop_fingerprint)]
+        hastus_variation_id = hastus_variation_lookup[(route_name, hastus_example.stop_fingerprint)]
         report.add(
             "TRP102",
             "warning",
@@ -418,10 +494,17 @@ def _audit_trip_patterns(
                 "headsign": cad_example.headsign,
                 "first_time": cad_example.first_time,
                 "last_time": cad_example.last_time,
+                "clevercad_variation_id": cad_variation_id,
+                "hastus_variation_id": hastus_variation_id,
+                "clevercad_shape_id": cad_example.shape_id,
+                "hastus_shape_id": hastus_example.shape_id,
+                "clevercad_variation_ids": sorted(cad_variation_ids),
+                "hastus_variation_ids": sorted(hastus_variation_ids),
+                "clevercad_shape_ids": sorted({item.shape_id for item in cad_journeys[journey_key] if item.shape_id}),
+                "hastus_shape_ids": sorted({item.shape_id for item in hastus_journeys[journey_key] if item.shape_id}),
             },
         )
 
-    common_journeys = set(cad_journeys) & set(hastus_journeys)
     route_names = sorted(
         {key[0] for key in cad_journeys} | {key[0] for key in hastus_journeys},
         key=lambda value: (not value.isdigit(), int(value) if value.isdigit() else value),
@@ -433,6 +516,18 @@ def _audit_trip_patterns(
         compared = sum(key[0] == route_name for key in common_journeys)
         mismatches = disagreements_by_route.get(route_name, 0)
         matches = compared - mismatches
+        cad_variations = cad_catalog.get(route_name, [])
+        hastus_variations = hastus_catalog.get(route_name, [])
+        comparable_cad = [item for item in cad_variations if item["comparable_journeys"]]
+        comparable_hastus = [item for item in hastus_variations if item["comparable_journeys"]]
+        affected_cad = [item for item in comparable_cad if item["has_problem"]]
+        affected_hastus = [item for item in comparable_hastus if item["has_problem"]]
+        if not mismatches:
+            variation_scope = "none"
+        elif affected_cad and affected_hastus and len(affected_cad) == len(comparable_cad) and len(affected_hastus) == len(comparable_hastus):
+            variation_scope = "all_comparable_variations"
+        else:
+            variation_scope = "specific_variations"
         route_health.append(
             {
                 "route_short_name": route_name,
@@ -443,6 +538,15 @@ def _audit_trip_patterns(
                 "mismatch_journeys": mismatches,
                 "match_percent": round(matches * 100 / compared, 1) if compared else None,
                 "status": "issues" if mismatches else ("healthy" if compared else "not_comparable"),
+                "clevercad_variation_count": len(cad_variations),
+                "hastus_variation_count": len(hastus_variations),
+                "comparable_clevercad_variations": len(comparable_cad),
+                "comparable_hastus_variations": len(comparable_hastus),
+                "affected_clevercad_variations": len(affected_cad),
+                "affected_hastus_variations": len(affected_hastus),
+                "variation_scope": variation_scope,
+                "clevercad_variations": cad_variations,
+                "hastus_variations": hastus_variations,
             }
         )
 

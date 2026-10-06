@@ -67,6 +67,16 @@
         <div class="route-legend"><span><i class="route-dot healthy"></i>All compared journeys match</span><span><i class="route-dot issues"></i>Pattern mismatches found</span><span><i class="route-dot not-comparable"></i>No equivalent journeys compared</span></div>
         <div class="route-grid" id="route-grid"></div>
         <div class="active-route hidden" id="active-route"><span id="active-route-label"></span><button type="button" class="text-button" id="clear-route">Show all routes</button></div>
+        <section class="variation-panel hidden" id="variation-panel" aria-labelledby="variation-title">
+          <div class="variation-heading">
+            <div><p class="eyebrow">Selected route</p><h4 id="variation-title">Route variations</h4><p id="variation-scope" class="quiet"></p></div>
+            <button type="button" class="text-button hidden" id="clear-variation">Clear variation filter</button>
+          </div>
+          <div class="variation-columns">
+            <div><h5>CleverCAD variations</h5><div class="variation-list" id="clevercad-variations"></div></div>
+            <div><h5>HASTUS variations</h5><div class="variation-list" id="hastus-variations"></div></div>
+          </div>
+        </section>
       </section>
 
       <section class="panel">
@@ -113,7 +123,7 @@
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
-  <footer><span>GTFS Merge Auditor 0.4</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.5</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

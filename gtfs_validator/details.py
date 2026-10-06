@@ -211,6 +211,10 @@ def build_detail(
             "headsign": context.get("headsign", ""),
             "first_time": context.get("first_time", ""),
             "last_time": context.get("last_time", ""),
+            "clevercad_variation_id": context.get("clevercad_variation_id", ""),
+            "hastus_variation_id": context.get("hastus_variation_id", ""),
+            "clevercad_shape_id": context.get("clevercad_shape_id", ""),
+            "hastus_shape_id": context.get("hastus_shape_id", ""),
         }
 
     return {"type": "generic", "finding": finding}

@@ -84,6 +84,8 @@ When the optional final feed is supplied, it additionally detects:
 - orphan shapes
 - grouped issue cards and progressive loading so large reports remain navigable
 - route-health dashboard covering healthy, mismatched, and non-comparable routes
+- route-variation inventory based on translated ordered stop patterns, with trip counts and source shape IDs
+- all-versus-specific variation impact classification and one-click variation filtering
 - clickable evidence drawers with full source stop records
 - offline coordinate maps for mapped-stop location disagreements
 - aligned trip comparisons that distinguish missing, extra, changed, and schedule-different stops

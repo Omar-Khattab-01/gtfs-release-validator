@@ -136,10 +136,18 @@ class ValidatorTests(unittest.TestCase):
             cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\n10017,EB935,ST-LAURENT D,45.422,-75.638\n20000,PX100,PARLIAMENT A,45.423,-75.700\n"
             hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\nEB935,3025,ST-LAURENT D,45.422,-75.638\nPX100,3000,PARLIAMENT A,45.423,-75.700\n"
             hastus_times = FILES["stop_times.txt"].replace("10017,1", "PX100,1").replace("20000,2", "EB935,2")
+            hastus_trips = FILES["trips.txt"].replace("shape19", "hastus_shape19")
+            hastus_shapes = FILES["shapes.txt"].replace("shape19", "hastus_shape19")
             write_feed(cad_path, extra={"stops.txt": cad_stops})
-            write_feed(hastus_path, extra={"stops.txt": hastus_stops, "stop_times.txt": hastus_times})
+            write_feed(hastus_path, extra={"stops.txt": hastus_stops, "stop_times.txt": hastus_times, "trips.txt": hastus_trips, "shapes.txt": hastus_shapes})
             report = validate_exports(cad_path, hastus_path)
             finding = next(item.to_dict() for item in report.findings if item.rule_id == "TRP102")
+            self.assertEqual("CAD V1", finding["context"]["clevercad_variation_id"])
+            self.assertEqual("HASTUS V1", finding["context"]["hastus_variation_id"])
+            self.assertEqual(["CAD V1"], finding["context"]["clevercad_variation_ids"])
+            self.assertEqual(["HASTUS V1"], finding["context"]["hastus_variation_ids"])
+            self.assertEqual("shape19", finding["context"]["clevercad_shape_id"])
+            self.assertEqual("hastus_shape19", finding["context"]["hastus_shape_id"])
             detail = build_detail(finding, str(cad_path), str(hastus_path))
             self.assertEqual("trip", detail["type"])
             self.assertEqual(["CleverCAD", "HASTUS"], [side["label"] for side in detail["sides"]])
@@ -152,6 +160,32 @@ class ValidatorTests(unittest.TestCase):
             route = next(item for item in report.stats["trip_reconciliation"]["route_health"] if item["route_short_name"] == "19")
             self.assertEqual("issues", route["status"])
             self.assertEqual(1, route["mismatch_journeys"])
+            self.assertEqual(1, route["clevercad_variation_count"])
+            self.assertEqual(1, route["hastus_variation_count"])
+            self.assertEqual("all_comparable_variations", route["variation_scope"])
+            self.assertTrue(route["clevercad_variations"][0]["has_problem"])
+            self.assertEqual(["shape19"], route["clevercad_variations"][0]["shape_ids"])
+            self.assertEqual("CAD V1", detail["clevercad_variation_id"])
+            self.assertEqual("hastus_shape19", detail["hastus_shape_id"])
+
+    def test_route_scope_distinguishes_one_bad_variation_from_all_variations(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\n1,HA,A,45.1,-75.1\n2,HB,B,45.2,-75.2\n3,HC,C,45.3,-75.3\n4,HD,D,45.4,-75.4\n"
+            hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\nHA,1,A,45.1,-75.1\nHB,2,B,45.2,-75.2\nHC,3,C,45.3,-75.3\nHD,4,D,45.4,-75.4\n"
+            cad_trips = "route_id,service_id,trip_id,trip_headsign,direction_id,shape_id\nr19,WKD,t1,Parliament,0,cad_shape_1\nr19,WKD,t2,Parliament,0,cad_shape_2\n"
+            hastus_trips = cad_trips.replace("cad_shape_1", "hastus_shape_1").replace("cad_shape_2", "hastus_shape_2")
+            cad_times = "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nt1,06:00:00,06:00:00,1,1\nt1,06:10:00,06:10:00,2,2\nt2,07:00:00,07:00:00,1,1\nt2,07:10:00,07:10:00,3,2\n"
+            hastus_times = "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nt1,06:00:00,06:00:00,HA,1\nt1,06:10:00,06:10:00,HD,2\nt2,07:00:00,07:00:00,HA,1\nt2,07:10:00,07:10:00,HC,2\n"
+            shapes = "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\ncad_shape_1,45.1,-75.1,1\ncad_shape_2,45.1,-75.1,1\nhastus_shape_1,45.1,-75.1,1\nhastus_shape_2,45.1,-75.1,1\n"
+            write_feed(cad_path, extra={"stops.txt": cad_stops, "trips.txt": cad_trips, "stop_times.txt": cad_times, "shapes.txt": shapes})
+            write_feed(hastus_path, extra={"stops.txt": hastus_stops, "trips.txt": hastus_trips, "stop_times.txt": hastus_times, "shapes.txt": shapes})
+            report = validate_exports(cad_path, hastus_path)
+            route = next(item for item in report.stats["trip_reconciliation"]["route_health"] if item["route_short_name"] == "19")
+            self.assertEqual(2, route["clevercad_variation_count"])
+            self.assertEqual(1, route["affected_clevercad_variations"])
+            self.assertEqual("specific_variations", route["variation_scope"])
 
 
 if __name__ == "__main__":

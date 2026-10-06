@@ -14,6 +14,7 @@ let activeFindings = [];
 let filteredFindings = [];
 let activeRule = '';
 let activeRoute = '';
+let activeVariation = '';
 let routeHealthData = [];
 let currentRunId = '';
 let pageLimit = 60;
@@ -75,6 +76,7 @@ function renderReport(report, id) {
   currentRunId = id;
   activeRule = '';
   activeRoute = '';
+  activeVariation = '';
   pageLimit = 60;
   results.classList.remove('hidden');
   const strip = document.querySelector('#decision-strip');
@@ -107,13 +109,15 @@ function renderRouteHealth(routes) {
   const statusOrder = {issues: 0, healthy: 1, not_comparable: 2};
   const orderedRoutes = [...routes].sort((a, b) => (statusOrder[a.status] - statusOrder[b.status]) || b.mismatch_journeys - a.mismatch_journeys || String(a.route_short_name).localeCompare(String(b.route_short_name), undefined, {numeric:true}));
   routeGrid.innerHTML = orderedRoutes.map(route => {
+    const variationCounts = `${route.clevercad_variation_count || 0} CAD / ${route.hastus_variation_count || 0} HASTUS variations`;
     const detail = route.status === 'issues'
-      ? `${route.mismatch_journeys} mismatch${route.mismatch_journeys === 1 ? '' : 'es'}`
-      : route.status === 'healthy' ? `${route.compared_journeys} compared · ${route.match_percent}%` : 'No comparable trips';
+      ? `${route.mismatch_journeys} mismatch${route.mismatch_journeys === 1 ? '' : 'es'} · ${route.affected_clevercad_variations || 0}/${route.comparable_clevercad_variations || 0} CAD variations affected`
+      : route.status === 'healthy' ? `${variationCounts} · all matching` : `${variationCounts} · not compared`;
     return `<button type="button" class="route-card ${escapeHtml(route.status)} ${activeRoute === route.route_short_name ? 'active' : ''}" data-route="${escapeHtml(route.route_short_name)}"><strong>${escapeHtml(route.route_short_name || 'Unnamed')}</strong><span>${escapeHtml(detail)}</span></button>`;
   }).join('');
   routeGrid.querySelectorAll('.route-card').forEach(card => card.addEventListener('click', () => {
     activeRoute = card.dataset.route;
+    activeVariation = '';
     activeRule = '';
     pageLimit = 60;
     renderRouteHealth(routes);
@@ -123,6 +127,35 @@ function renderRouteHealth(routes) {
   const active = document.querySelector('#active-route');
   active.classList.toggle('hidden', !activeRoute);
   document.querySelector('#active-route-label').textContent = activeRoute ? `Showing evidence for route ${activeRoute}` : '';
+  renderVariationPanel(routes.find(route => route.route_short_name === activeRoute));
+}
+
+function renderVariationPanel(route) {
+  const panel = document.querySelector('#variation-panel');
+  panel.classList.toggle('hidden', !route);
+  if (!route) return;
+  const scopeLabels = {
+    all_comparable_variations: 'Every comparable route variation is affected.',
+    specific_variations: 'The problem is limited to specific route variations.',
+    none: route.status === 'not_comparable' ? 'No equivalent journeys were available to compare.' : 'All comparable route variations match.'
+  };
+  document.querySelector('#variation-title').textContent = `Route ${route.route_short_name} · ${route.clevercad_variation_count} CleverCAD and ${route.hastus_variation_count} HASTUS variations`;
+  document.querySelector('#variation-scope').textContent = scopeLabels[route.variation_scope] || '';
+  const renderSide = (items, source) => items.map(item => {
+    const key = `${source}|${item.variation_id}`;
+    const shapes = item.shape_ids?.length ? item.shape_ids.join(', ') : 'No shape_id';
+    const descriptors = [...(item.direction_ids || []).map(value => `direction ${value}`), ...(item.headsigns || []).map(value => `to ${value}`)].join(' · ') || 'No direction/headsign';
+    return `<button type="button" class="variation-card ${item.has_problem ? 'affected' : 'matching'} ${activeVariation === key ? 'active' : ''}" data-variation-key="${escapeHtml(key)}"><span class="variation-card-top"><strong>${escapeHtml(item.variation_id)}</strong><span>${item.has_problem ? `${item.affected_journeys} affected` : item.comparable_journeys ? 'Matching' : 'Not compared'}</span></span><span>${escapeHtml(item.stop_count)} stops · ${escapeHtml(item.trip_count)} trip${item.trip_count === 1 ? '' : 's'}</span><span>${escapeHtml(descriptors)}</span><code>shape: ${escapeHtml(shapes)}</code></button>`;
+  }).join('') || '<p class="quiet">No variations found.</p>';
+  document.querySelector('#clevercad-variations').innerHTML = renderSide(route.clevercad_variations || [], 'CAD');
+  document.querySelector('#hastus-variations').innerHTML = renderSide(route.hastus_variations || [], 'HASTUS');
+  panel.querySelectorAll('.variation-card').forEach(card => card.addEventListener('click', () => {
+    activeVariation = activeVariation === card.dataset.variationKey ? '' : card.dataset.variationKey;
+    pageLimit = 60;
+    renderVariationPanel(route);
+    renderFindings();
+  }));
+  document.querySelector('#clear-variation').classList.toggle('hidden', !activeVariation);
 }
 
 function renderIssueGroups() {
@@ -148,8 +181,12 @@ function getFilteredFindings() {
   const category = categoryFilter.value;
   return activeFindings.filter(f => {
     const route = String(f.context?.route_short_name || '');
-    const haystack = [f.rule_id, f.category, f.title, f.message, f.file, f.key, f.observed, f.expected, route].join(' ').toLowerCase();
-    return (!needle || haystack.includes(needle)) && (!severity || f.severity === severity) && (!category || f.category === category) && (!activeRule || f.rule_id === activeRule) && (!activeRoute || route === activeRoute);
+    const variationKeys = [
+      ...(f.context?.clevercad_variation_ids || [f.context?.clevercad_variation_id]).filter(Boolean).map(value => `CAD|${value}`),
+      ...(f.context?.hastus_variation_ids || [f.context?.hastus_variation_id]).filter(Boolean).map(value => `HASTUS|${value}`)
+    ];
+    const haystack = [f.rule_id, f.category, f.title, f.message, f.file, f.key, f.observed, f.expected, route, ...variationKeys, f.context?.clevercad_shape_id, f.context?.hastus_shape_id].join(' ').toLowerCase();
+    return (!needle || haystack.includes(needle)) && (!severity || f.severity === severity) && (!category || f.category === category) && (!activeRule || f.rule_id === activeRule) && (!activeRoute || route === activeRoute) && (!activeVariation || variationKeys.includes(activeVariation));
   });
 }
 
@@ -172,7 +209,13 @@ function renderFindings() {
   loadMore.textContent = `Show ${Math.min(100, filteredFindings.length - visible.length)} more`;
   list.innerHTML = visible.map(f => {
     const [left, right] = previewValues(f);
-    return `<article class="finding-card"><input class="finding-select" type="checkbox" aria-label="Select finding ${escapeHtml(f.rule_id)}" data-index="${f._index}" ${selected.has(f._index) ? 'checked' : ''}><button type="button" class="finding-open" data-index="${f._index}"><span class="finding-meta"><span class="pill ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span><span class="rule">${escapeHtml(f.rule_id)}</span><span class="finding-key">${escapeHtml(f.key || f.file || '')}</span></span><h4>${escapeHtml(f.title)}</h4><div class="finding-preview"><span class="preview-value"><strong>CleverCAD / observed</strong><br>${escapeHtml(left)}</span><span class="preview-value hastus"><strong>HASTUS / expected</strong><br>${escapeHtml(right)}</span></div></button><span class="view-evidence">View evidence →</span></article>`;
+    const cadVariations = (f.context?.clevercad_variation_ids || [f.context?.clevercad_variation_id]).filter(Boolean).join(', ');
+    const hastusVariations = (f.context?.hastus_variation_ids || [f.context?.hastus_variation_id]).filter(Boolean).join(', ');
+    const cadShapes = (f.context?.clevercad_shape_ids || [f.context?.clevercad_shape_id]).filter(Boolean).join(', ');
+    const hastusShapes = (f.context?.hastus_shape_ids || [f.context?.hastus_shape_id]).filter(Boolean).join(', ');
+    const variationEvidence = f.context?.clevercad_variation_id || f.context?.hastus_variation_id
+      ? `<div class="finding-variation"><span>${escapeHtml(cadVariations || 'CAD variation unavailable')} · shape ${escapeHtml(cadShapes || '—')}</span><span>${escapeHtml(hastusVariations || 'HASTUS variation unavailable')} · shape ${escapeHtml(hastusShapes || '—')}</span></div>` : '';
+    return `<article class="finding-card"><input class="finding-select" type="checkbox" aria-label="Select finding ${escapeHtml(f.rule_id)}" data-index="${f._index}" ${selected.has(f._index) ? 'checked' : ''}><button type="button" class="finding-open" data-index="${f._index}"><span class="finding-meta"><span class="pill ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span><span class="rule">${escapeHtml(f.rule_id)}</span><span class="finding-key">${escapeHtml(f.key || f.file || '')}</span></span><h4>${escapeHtml(f.title)}</h4>${variationEvidence}<div class="finding-preview"><span class="preview-value"><strong>CleverCAD / observed</strong><br>${escapeHtml(left)}</span><span class="preview-value hastus"><strong>HASTUS / expected</strong><br>${escapeHtml(right)}</span></div></button><span class="view-evidence">View evidence →</span></article>`;
   }).join('');
   document.querySelectorAll('.finding-select').forEach(box => box.addEventListener('change', () => {
     const index = Number(box.dataset.index);
@@ -271,7 +314,7 @@ function renderCoordinateMap(cad, hastus, distance) {
 
 function renderTripDetail(detail) {
   const differences = detail.differences || [];
-  const context = [detail.route_short_name && `Route ${detail.route_short_name}`, detail.headsign && `To ${detail.headsign}`, detail.first_time && `${detail.first_time}–${detail.last_time}`, `${differences.length} explained differences`].filter(Boolean);
+  const context = [detail.route_short_name && `Route ${detail.route_short_name}`, detail.headsign && `To ${detail.headsign}`, detail.first_time && `${detail.first_time}–${detail.last_time}`, detail.clevercad_variation_id && `${detail.clevercad_variation_id} · shape ${detail.clevercad_shape_id || '—'}`, detail.hastus_variation_id && `${detail.hastus_variation_id} · shape ${detail.hastus_shape_id || '—'}`, `${differences.length} explained differences`].filter(Boolean);
   const statusLabels = {match:'Match', different_stop:'Different stops', clevercad_only:'Only in CleverCAD', hastus_only:'Only in HASTUS', schedule_difference:'Time / boarding rules'};
   const rows = (detail.alignment || []).map((row, index) => {
     const cad = row.clevercad || {};
@@ -333,7 +376,8 @@ function downloadStopRows(rows) {
 
 document.querySelector('#load-more').addEventListener('click', () => { pageLimit += 100; renderFindings(); });
 document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); renderFindings(); });
-document.querySelector('#clear-route').addEventListener('click', () => { activeRoute = ''; renderRouteHealth(routeHealthData); renderFindings(); });
+document.querySelector('#clear-route').addEventListener('click', () => { activeRoute = ''; activeVariation = ''; renderRouteHealth(routeHealthData); renderFindings(); });
+document.querySelector('#clear-variation').addEventListener('click', () => { activeVariation = ''; renderRouteHealth(routeHealthData); renderFindings(); });
 document.querySelector('#export-selected').addEventListener('click', () => downloadRows(activeFindings.filter(f => selected.has(f._index)), 'selected-gtfs-findings.csv'));
 document.querySelector('#export-stops').addEventListener('click', () => downloadStopRows(filteredFindings.filter(f => f.rule_id.startsWith('STP'))));
 document.querySelector('#close-drawer').addEventListener('click', () => drawer.classList.add('hidden'));
