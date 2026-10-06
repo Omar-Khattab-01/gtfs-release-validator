@@ -62,7 +62,7 @@
       <section class="panel route-panel">
         <div class="section-heading compact">
           <div><span class="step">02</span><h3>Route health</h3></div>
-          <span class="quiet" id="route-summary">Select a route to isolate its trip findings</span>
+          <div class="route-heading-actions"><span class="quiet" id="route-summary">Select a route to isolate its trip findings</span><label>Sort routes<select id="route-sort"><option value="number">Route number</option><option value="attention">Needs attention</option><option value="variations">Most variations</option></select></label></div>
         </div>
         <div class="route-legend"><span><i class="route-dot healthy"></i>All compared journeys match</span><span><i class="route-dot issues"></i>Pattern mismatches found</span><span><i class="route-dot not-comparable"></i>No equivalent journeys compared</span></div>
         <div class="route-grid" id="route-grid"></div>
@@ -70,12 +70,10 @@
         <section class="variation-panel hidden" id="variation-panel" aria-labelledby="variation-title">
           <div class="variation-heading">
             <div><p class="eyebrow">Selected route</p><h4 id="variation-title">Route variations</h4><p id="variation-scope" class="quiet"></p></div>
-            <button type="button" class="text-button hidden" id="clear-variation">Clear variation filter</button>
+            <button type="button" class="text-button hidden" id="clear-variation">Close variation</button>
           </div>
-          <div class="variation-columns">
-            <div><h5>CleverCAD variations</h5><div class="variation-list" id="clevercad-variations"></div></div>
-            <div><h5>HASTUS variations</h5><div class="variation-list" id="hastus-variations"></div></div>
-          </div>
+          <div class="variation-tab-groups" id="variation-tabs"></div>
+          <div class="variation-detail" id="variation-detail"><p class="variation-prompt">Choose a variation tab to compare its representative CleverCAD and HASTUS stop patterns.</p></div>
         </section>
       </section>
 
@@ -123,7 +121,7 @@
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
-  <footer><span>GTFS Merge Auditor 0.5</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.6</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

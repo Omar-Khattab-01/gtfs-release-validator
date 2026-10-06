@@ -107,7 +107,7 @@ def _align_sequences(sides: list[dict[str, Any]], compare_schedule: bool = False
     schedule_fields = ("arrival_time", "departure_time", "pickup_type", "drop_off_type")
 
     def append(first: dict[str, Any] | None, second: dict[str, Any] | None, status: str) -> None:
-        fields = [field for field in schedule_fields if first and second and first.get(field) != second.get(field)]
+        fields = [field for field in schedule_fields if compare_schedule and first and second and first.get(field) != second.get(field)]
         if status == "match" and compare_schedule and fields:
             status = "schedule_difference"
         alignment.append({"clevercad": first, "hastus": second, "status": status, "fields": fields})

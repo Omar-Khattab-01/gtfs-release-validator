@@ -13,7 +13,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .details import build_detail
 from .merge import validate_merge
@@ -34,6 +34,7 @@ class Job:
     error: str | None = None
     report: dict[str, Any] | None = None
     details_cache: dict[int, dict[str, Any]] = field(default_factory=dict)
+    variation_cache: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def public(self) -> dict[str, Any]:
@@ -75,7 +76,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.5"
+    server_version = "GTFSValidator/0.6"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -106,7 +107,8 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
         if path == "/":
             return self._serve_asset("index.html")
         if path.startswith("/assets/"):
@@ -162,6 +164,40 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                         )
                     with job.lock:
                         job.details_cache[finding_index] = cached
+                return self._json(HTTPStatus.OK, cached)
+            if len(parts) == 4 and parts[3] == "variation-detail":
+                query = parse_qs(parsed_url.query)
+                cad_trip_id = str((query.get("cad_trip_id") or [""])[0]).strip()
+                hastus_trip_id = str((query.get("hastus_trip_id") or [""])[0]).strip()
+                if not cad_trip_id or not hastus_trip_id:
+                    return self._json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": "Both representative trip IDs are required"},
+                    )
+                cache_key = (cad_trip_id, hastus_trip_id)
+                with job.lock:
+                    cached = job.variation_cache.get(cache_key)
+                if cached is None:
+                    try:
+                        cached = build_detail(
+                            {
+                                "rule_id": "TRP102",
+                                "context": {
+                                    "clevercad_trip_id": cad_trip_id,
+                                    "hastus_trip_id": hastus_trip_id,
+                                },
+                            },
+                            job.clevercad_path,
+                            job.hastus_path,
+                            job.final_path,
+                        )
+                    except (OSError, KeyError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile) as exc:
+                        return self._json(
+                            HTTPStatus.UNPROCESSABLE_ENTITY,
+                            {"error": f"Could not load variation evidence: {exc}"},
+                        )
+                    with job.lock:
+                        job.variation_cache[cache_key] = cached
                 return self._json(HTTPStatus.OK, cached)
         return self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 

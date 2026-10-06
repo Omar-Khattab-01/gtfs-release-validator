@@ -415,12 +415,14 @@ def _audit_trip_patterns(
                 )
             )
             for number, (fingerprint, trips) in enumerate(patterns, start=1):
+                example = min(trips, key=lambda trip: (trip.first_time, trip.last_time, trip.trip_id))
                 variation_id = f"{prefix} V{number}"
                 lookup[(route_name, fingerprint)] = variation_id
                 by_route[route_name].append(
                     {
                         "variation_id": variation_id,
-                        "pattern_fingerprint": fingerprint[:16],
+                        "pattern_fingerprint": fingerprint,
+                        "example_trip_id": example.trip_id,
                         "stop_count": trips[0].stop_count,
                         "trip_count": len(trips),
                         "shape_ids": sorted({trip.shape_id for trip in trips if trip.shape_id}),

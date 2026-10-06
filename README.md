@@ -86,6 +86,8 @@ When the optional final feed is supplied, it additionally detects:
 - route-health dashboard covering healthy, mismatched, and non-comparable routes
 - route-variation inventory based on translated ordered stop patterns, with trip counts and source shape IDs
 - all-versus-specific variation impact classification and one-click variation filtering
+- compact variation tabs for mismatched, matching, and source-only patterns, with on-demand stop-by-stop comparison
+- route sorting by route number, attention priority, or variation count
 - clickable evidence drawers with full source stop records
 - offline coordinate maps for mapped-stop location disagreements
 - aligned trip comparisons that distinguish missing, extra, changed, and schedule-different stops
