@@ -390,12 +390,14 @@ def _audit_trip_patterns(
     cad_journeys = by_journey(cad_summaries)
     hastus_journeys = by_journey(hastus_summaries)
     disagreement_count = 0
+    disagreements_by_route: dict[str, int] = defaultdict(int)
     for journey_key in sorted(set(cad_journeys) & set(hastus_journeys)):
         cad_patterns = {item.stop_fingerprint for item in cad_journeys[journey_key]}
         hastus_patterns = {item.stop_fingerprint for item in hastus_journeys[journey_key]}
         if cad_patterns & hastus_patterns:
             continue
         disagreement_count += 1
+        disagreements_by_route[journey_key[0]] += 1
         cad_example = cad_journeys[journey_key][0]
         hastus_example = hastus_journeys[journey_key][0]
         report.add(
@@ -419,11 +421,37 @@ def _audit_trip_patterns(
             },
         )
 
+    common_journeys = set(cad_journeys) & set(hastus_journeys)
+    route_names = sorted(
+        {key[0] for key in cad_journeys} | {key[0] for key in hastus_journeys},
+        key=lambda value: (not value.isdigit(), int(value) if value.isdigit() else value),
+    )
+    route_health = []
+    for route_name in route_names:
+        cad_count = sum(key[0] == route_name for key in cad_journeys)
+        hastus_count = sum(key[0] == route_name for key in hastus_journeys)
+        compared = sum(key[0] == route_name for key in common_journeys)
+        mismatches = disagreements_by_route.get(route_name, 0)
+        matches = compared - mismatches
+        route_health.append(
+            {
+                "route_short_name": route_name,
+                "clevercad_journeys": cad_count,
+                "hastus_journeys": hastus_count,
+                "compared_journeys": compared,
+                "matching_journeys": matches,
+                "mismatch_journeys": mismatches,
+                "match_percent": round(matches * 100 / compared, 1) if compared else None,
+                "status": "issues" if mismatches else ("healthy" if compared else "not_comparable"),
+            }
+        )
+
     report.stats["trip_reconciliation"] = {
         "clevercad_canonical_trips": len(cad_summaries),
         "hastus_canonical_trips": len(hastus_summaries),
         "common_scheduled_journeys": len(set(cad_journeys) & set(hastus_journeys)),
         "source_pattern_disagreements": disagreement_count,
+        "route_health": route_health,
     }
     if final_summaries is not None:
         report.stats["trip_reconciliation"]["final_canonical_trips"] = len(final_summaries)

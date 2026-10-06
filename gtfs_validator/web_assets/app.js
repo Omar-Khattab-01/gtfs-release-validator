@@ -13,6 +13,8 @@ const drawer = document.querySelector('#drawer-backdrop');
 let activeFindings = [];
 let filteredFindings = [];
 let activeRule = '';
+let activeRoute = '';
+let routeHealthData = [];
 let currentRunId = '';
 let pageLimit = 60;
 const selected = new Set();
@@ -72,6 +74,7 @@ async function poll(id) {
 function renderReport(report, id) {
   currentRunId = id;
   activeRule = '';
+  activeRoute = '';
   pageLimit = 60;
   results.classList.remove('hidden');
   const strip = document.querySelector('#decision-strip');
@@ -86,11 +89,40 @@ function renderReport(report, id) {
   activeFindings = report.findings.map((finding, index) => ({...finding, _index: index}));
   const categories = [...new Set(activeFindings.map(f => f.category))].sort();
   categoryFilter.innerHTML = '<option value="">All categories</option>' + categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+  renderRouteHealth(report.stats?.trip_reconciliation?.route_health || []);
   renderIssueGroups();
   renderFindings();
   renderInventory(report);
   renderPackaging(report);
   results.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function renderRouteHealth(routes) {
+  routeHealthData = routes;
+  const routeGrid = document.querySelector('#route-grid');
+  const issueRoutes = routes.filter(route => route.status === 'issues').length;
+  const healthyRoutes = routes.filter(route => route.status === 'healthy').length;
+  const unpairedRoutes = routes.filter(route => route.status === 'not_comparable').length;
+  document.querySelector('#route-summary').textContent = `${issueRoutes} with mismatches · ${healthyRoutes} matching · ${unpairedRoutes} not compared`;
+  const statusOrder = {issues: 0, healthy: 1, not_comparable: 2};
+  const orderedRoutes = [...routes].sort((a, b) => (statusOrder[a.status] - statusOrder[b.status]) || b.mismatch_journeys - a.mismatch_journeys || String(a.route_short_name).localeCompare(String(b.route_short_name), undefined, {numeric:true}));
+  routeGrid.innerHTML = orderedRoutes.map(route => {
+    const detail = route.status === 'issues'
+      ? `${route.mismatch_journeys} mismatch${route.mismatch_journeys === 1 ? '' : 'es'}`
+      : route.status === 'healthy' ? `${route.compared_journeys} compared · ${route.match_percent}%` : 'No comparable trips';
+    return `<button type="button" class="route-card ${escapeHtml(route.status)} ${activeRoute === route.route_short_name ? 'active' : ''}" data-route="${escapeHtml(route.route_short_name)}"><strong>${escapeHtml(route.route_short_name || 'Unnamed')}</strong><span>${escapeHtml(detail)}</span></button>`;
+  }).join('');
+  routeGrid.querySelectorAll('.route-card').forEach(card => card.addEventListener('click', () => {
+    activeRoute = card.dataset.route;
+    activeRule = '';
+    pageLimit = 60;
+    renderRouteHealth(routes);
+    renderIssueGroups();
+    renderFindings();
+  }));
+  const active = document.querySelector('#active-route');
+  active.classList.toggle('hidden', !activeRoute);
+  document.querySelector('#active-route-label').textContent = activeRoute ? `Showing evidence for route ${activeRoute}` : '';
 }
 
 function renderIssueGroups() {
@@ -115,8 +147,9 @@ function getFilteredFindings() {
   const severity = severityFilter.value;
   const category = categoryFilter.value;
   return activeFindings.filter(f => {
-    const haystack = [f.rule_id, f.category, f.title, f.message, f.file, f.key, f.observed, f.expected].join(' ').toLowerCase();
-    return (!needle || haystack.includes(needle)) && (!severity || f.severity === severity) && (!category || f.category === category) && (!activeRule || f.rule_id === activeRule);
+    const route = String(f.context?.route_short_name || '');
+    const haystack = [f.rule_id, f.category, f.title, f.message, f.file, f.key, f.observed, f.expected, route].join(' ').toLowerCase();
+    return (!needle || haystack.includes(needle)) && (!severity || f.severity === severity) && (!category || f.category === category) && (!activeRule || f.rule_id === activeRule) && (!activeRoute || route === activeRoute);
   });
 }
 
@@ -211,8 +244,9 @@ function renderDetail(finding, detail) {
 }
 
 function sourceCard(label, data, cssClass='') {
-  const preferred = ['stop_id','stop_code','stop_name','stop_lat','stop_lon','location_type','parent_station','platform_code','wheelchair_boarding'];
-  const fields = preferred.filter(key => Object.hasOwn(data || {}, key));
+  const preferred = ['stop_id','stop_code','stop_name','stop_desc','stop_lat','stop_lon','zone_id','stop_url','location_type','parent_station','stop_timezone','wheelchair_boarding','level_id','platform_code'];
+  const remaining = Object.keys(data || {}).filter(key => !preferred.includes(key));
+  const fields = [...preferred.filter(key => Object.hasOwn(data || {}, key)), ...remaining];
   return `<section class="source-card ${cssClass}"><h3>${escapeHtml(label)}</h3><dl class="field-list">${fields.map(key => `<div><dt>${escapeHtml(key.replaceAll('_',' '))}</dt><dd>${escapeHtml(data[key] || '—')}</dd></div>`).join('')}</dl></section>`;
 }
 
@@ -236,10 +270,23 @@ function renderCoordinateMap(cad, hastus, distance) {
 }
 
 function renderTripDetail(detail) {
-  const changed = new Set((detail.differences || []).map(item => item.position));
-  const context = [detail.route_short_name && `Route ${detail.route_short_name}`, detail.headsign && `To ${detail.headsign}`, detail.first_time && `${detail.first_time}–${detail.last_time}`, `${detail.differences.length} differing positions`].filter(Boolean);
-  const sides = detail.sides.map(side => `<section class="trip-side ${side.label === 'HASTUS' ? 'hastus' : ''}"><h3>${escapeHtml(side.label)} · ${escapeHtml(side.trip_id)} · ${side.stops.length} stops</h3><table><thead><tr><th>#</th><th>Time</th><th>Source ID</th><th>Mapped ID</th><th>Stop</th></tr></thead><tbody>${side.stops.map((stop,index)=>`<tr class="${changed.has(index+1) ? 'changed' : ''}"><td>${escapeHtml(stop.sequence)}</td><td>${escapeHtml(stop.departure_time || stop.arrival_time)}</td><td>${escapeHtml(stop.source_stop_id)}</td><td>${escapeHtml(stop.canonical_stop_id)}</td><td>${escapeHtml(stop.stop_name)}</td></tr>`).join('')}</tbody></table></section>`).join('');
-  return `<div class="trip-context">${context.map(value=>`<span>${escapeHtml(value)}</span>`).join('')}</div><div class="trip-grid">${sides}</div>`;
+  const differences = detail.differences || [];
+  const context = [detail.route_short_name && `Route ${detail.route_short_name}`, detail.headsign && `To ${detail.headsign}`, detail.first_time && `${detail.first_time}–${detail.last_time}`, `${differences.length} explained differences`].filter(Boolean);
+  const statusLabels = {match:'Match', different_stop:'Different stops', clevercad_only:'Only in CleverCAD', hastus_only:'Only in HASTUS', schedule_difference:'Time / boarding rules'};
+  const rows = (detail.alignment || []).map((row, index) => {
+    const cad = row.clevercad || {};
+    const hastus = row.hastus || {};
+    const changedFields = row.fields?.length ? `<br><small>${escapeHtml(row.fields.join(', ').replaceAll('_',' '))}</small>` : '';
+    return `<tr class="${escapeHtml(row.status.replaceAll('_','-'))}"><td>${index + 1}</td><td class="status-cell"><span class="diff-badge ${escapeHtml(row.status.replaceAll('_','-'))}">${escapeHtml(statusLabels[row.status] || row.status)}</span>${changedFields}</td><td>${escapeHtml(cad.sequence || '—')}</td><td>${escapeHtml(cad.departure_time || cad.arrival_time || '—')}</td><td><strong>${escapeHtml(cad.stop_name || '—')}</strong><br><small>source ${escapeHtml(cad.source_stop_id || '—')} · mapped ${escapeHtml(cad.canonical_stop_id || '—')}</small></td><td>${escapeHtml(hastus.sequence || '—')}</td><td>${escapeHtml(hastus.departure_time || hastus.arrival_time || '—')}</td><td><strong>${escapeHtml(hastus.stop_name || '—')}</strong><br><small>source ${escapeHtml(hastus.source_stop_id || '—')} · mapped ${escapeHtml(hastus.canonical_stop_id || '—')}</small></td></tr>`;
+  }).join('');
+  const evidence = differences.map((row, index) => {
+    const cad = row.clevercad;
+    const hastus = row.hastus;
+    const cadName = cad?.stop_name || 'No CleverCAD stop';
+    const hastusName = hastus?.stop_name || 'No HASTUS stop';
+    return `<details class="mismatch-evidence"><summary>${index + 1}. ${escapeHtml(statusLabels[row.status] || row.status)} · ${escapeHtml(cadName)} ↔ ${escapeHtml(hastusName)}</summary><div class="source-grid">${sourceCard('CleverCAD complete stop record', cad?.source_record || {}, '')}${sourceCard('HASTUS complete stop record', hastus?.source_record || {}, 'hastus')}</div></details>`;
+  }).join('');
+  return `<div class="trip-context">${context.map(value=>`<span>${escapeHtml(value)}</span>`).join('')}</div><div class="comparison-table"><table><thead><tr><th>Aligned row</th><th>Result</th><th>CAD #</th><th>CAD time</th><th>CleverCAD stop</th><th>HASTUS #</th><th>HASTUS time</th><th>HASTUS stop</th></tr></thead><tbody>${rows}</tbody></table></div><div class="mismatch-stack"><h3>Mismatch evidence</h3><p class="quiet">Open any difference to see every available stops.txt field from both exports.</p>${evidence || '<p>No sequence differences were found.</p>'}</div>`;
 }
 
 function csvCell(value) {
@@ -286,6 +333,7 @@ function downloadStopRows(rows) {
 
 document.querySelector('#load-more').addEventListener('click', () => { pageLimit += 100; renderFindings(); });
 document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); renderFindings(); });
+document.querySelector('#clear-route').addEventListener('click', () => { activeRoute = ''; renderRouteHealth(routeHealthData); renderFindings(); });
 document.querySelector('#export-selected').addEventListener('click', () => downloadRows(activeFindings.filter(f => selected.has(f._index)), 'selected-gtfs-findings.csv'));
 document.querySelector('#export-stops').addEventListener('click', () => downloadStopRows(filteredFindings.filter(f => f.rule_id.startsWith('STP'))));
 document.querySelector('#close-drawer').addEventListener('click', () => drawer.classList.add('hidden'));

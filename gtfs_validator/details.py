@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import difflib
 import io
 import math
 import zipfile
@@ -56,6 +57,7 @@ def _trip_stop_times(
                     "departure_time": (row.get("departure_time") or "").strip(),
                     "pickup_type": (row.get("pickup_type") or "").strip(),
                     "drop_off_type": (row.get("drop_off_type") or "").strip(),
+                    "source_record": stop,
                 }
             )
     def sequence_key(item: dict[str, Any]) -> tuple[int, str]:
@@ -91,22 +93,45 @@ def _translation(cad_stops: dict[str, dict[str, str]], hastus_stops: dict[str, d
     }
 
 
-def _compare_sequences(sides: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _align_sequences(sides: list[dict[str, Any]], compare_schedule: bool = False) -> list[dict[str, Any]]:
     if len(sides) < 2:
         return []
     left = sides[0]["stops"]
     right = sides[1]["stops"]
-    differences: list[dict[str, Any]] = []
-    for index in range(max(len(left), len(right))):
-        first = left[index] if index < len(left) else None
-        second = right[index] if index < len(right) else None
-        if first == second:
+    matcher = difflib.SequenceMatcher(
+        a=[row["canonical_stop_id"] for row in left],
+        b=[row["canonical_stop_id"] for row in right],
+        autojunk=False,
+    )
+    alignment: list[dict[str, Any]] = []
+    schedule_fields = ("arrival_time", "departure_time", "pickup_type", "drop_off_type")
+
+    def append(first: dict[str, Any] | None, second: dict[str, Any] | None, status: str) -> None:
+        fields = [field for field in schedule_fields if first and second and first.get(field) != second.get(field)]
+        if status == "match" and compare_schedule and fields:
+            status = "schedule_difference"
+        alignment.append({"clevercad": first, "hastus": second, "status": status, "fields": fields})
+
+    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+        if tag == "equal":
+            for offset in range(left_end - left_start):
+                append(left[left_start + offset], right[right_start + offset], "match")
             continue
-        fields = ("canonical_stop_id", "arrival_time", "departure_time", "pickup_type", "drop_off_type")
-        changed = [field for field in fields if (first or {}).get(field) != (second or {}).get(field)]
-        if changed:
-            differences.append({"position": index + 1, "fields": changed})
-    return differences
+        if tag == "delete":
+            for first in left[left_start:left_end]:
+                append(first, None, "clevercad_only")
+            continue
+        if tag == "insert":
+            for second in right[right_start:right_end]:
+                append(None, second, "hastus_only")
+            continue
+        width = max(left_end - left_start, right_end - right_start)
+        for offset in range(width):
+            first = left[left_start + offset] if left_start + offset < left_end else None
+            second = right[right_start + offset] if right_start + offset < right_end else None
+            status = "different_stop" if first and second else ("clevercad_only" if first else "hastus_only")
+            append(first, second, status)
+    return alignment
 
 
 def build_detail(
@@ -176,10 +201,12 @@ def build_detail(
                     "stops": _trip_stop_times(final_path, final_trip_id, final_stops),
                 }
             )
+        alignment = _align_sequences(sides[:2], compare_schedule=rule_id == "TRP101")
         return {
             "type": "trip",
             "sides": sides,
-            "differences": _compare_sequences(sides[:2]),
+            "alignment": alignment,
+            "differences": [row for row in alignment if row["status"] != "match"],
             "route_short_name": context.get("route_short_name", ""),
             "headsign": context.get("headsign", ""),
             "first_time": context.get("first_time", ""),

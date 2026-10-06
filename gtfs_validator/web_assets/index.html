@@ -59,9 +59,19 @@
 
       <div class="metric-grid" id="metrics"></div>
 
+      <section class="panel route-panel">
+        <div class="section-heading compact">
+          <div><span class="step">02</span><h3>Route health</h3></div>
+          <span class="quiet" id="route-summary">Select a route to isolate its trip findings</span>
+        </div>
+        <div class="route-legend"><span><i class="route-dot healthy"></i>All compared journeys match</span><span><i class="route-dot issues"></i>Pattern mismatches found</span><span><i class="route-dot not-comparable"></i>No equivalent journeys compared</span></div>
+        <div class="route-grid" id="route-grid"></div>
+        <div class="active-route hidden" id="active-route"><span id="active-route-label"></span><button type="button" class="text-button" id="clear-route">Show all routes</button></div>
+      </section>
+
       <section class="panel">
         <div class="section-heading">
-          <div><span class="step">02</span><h3>Investigation centre</h3></div>
+          <div><span class="step">03</span><h3>Investigation centre</h3></div>
           <div class="actions"><a id="csv-link" class="button secondary">Export CSV</a><a id="json-link" class="button secondary">Export JSON</a></div>
         </div>
         <div class="issue-groups" id="issue-groups"></div>
@@ -84,11 +94,11 @@
 
       <section class="lower-grid">
         <div class="panel">
-          <div class="section-heading compact"><div><span class="step">03</span><h3>Feed inventory</h3></div></div>
+          <div class="section-heading compact"><div><span class="step">04</span><h3>Feed inventory</h3></div></div>
           <div id="inventory" class="inventory"></div>
         </div>
         <div class="panel">
-          <div class="section-heading compact"><div><span class="step">04</span><h3>Packaging</h3></div></div>
+          <div class="section-heading compact"><div><span class="step">05</span><h3>Packaging</h3></div></div>
           <div id="packaging" class="packaging"></div>
         </div>
       </section>
@@ -103,7 +113,7 @@
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
-  <footer><span>GTFS Merge Auditor 0.3</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.4</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

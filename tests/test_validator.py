@@ -144,6 +144,14 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual("trip", detail["type"])
             self.assertEqual(["CleverCAD", "HASTUS"], [side["label"] for side in detail["sides"]])
             self.assertEqual(2, len(detail["differences"]))
+            self.assertEqual({"clevercad_only", "hastus_only"}, {row["status"] for row in detail["differences"]})
+            cad_only = next(row for row in detail["differences"] if row["status"] == "clevercad_only")
+            hastus_only = next(row for row in detail["differences"] if row["status"] == "hastus_only")
+            self.assertEqual("PARLIAMENT A", cad_only["clevercad"]["stop_name"])
+            self.assertEqual("PARLIAMENT A", hastus_only["hastus"]["stop_name"])
+            route = next(item for item in report.stats["trip_reconciliation"]["route_health"] if item["route_short_name"] == "19")
+            self.assertEqual("issues", route["status"])
+            self.assertEqual(1, route["mismatch_journeys"])
 
 
 if __name__ == "__main__":

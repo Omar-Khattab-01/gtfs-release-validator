@@ -83,9 +83,11 @@ When the optional final feed is supplied, it additionally detects:
 - stop-time syntax, arrival/departure order, duplicate sequences, and nondecreasing trip times
 - orphan shapes
 - grouped issue cards and progressive loading so large reports remain navigable
+- route-health dashboard covering healthy, mismatched, and non-comparable routes
 - clickable evidence drawers with full source stop records
 - offline coordinate maps for mapped-stop location disagreements
-- side-by-side stop sequences for trip-pattern disagreements
+- aligned trip comparisons that distinguish missing, extra, changed, and schedule-different stops
+- expandable mismatch evidence with every available stops.txt field from both exports
 - selection exports and a purpose-built affected-stops CSV
 - searchable findings and complete JSON/CSV report downloads
 
