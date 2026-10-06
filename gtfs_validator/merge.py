@@ -408,6 +408,15 @@ def _audit_trip_patterns(
             key=" | ".join(journey_key),
             observed=f"CAD {cad_example.trip_id}: {cad_example.stop_count} stops",
             expected=f"HASTUS {hastus_example.trip_id}: {hastus_example.stop_count} stops",
+            context={
+                "clevercad_trip_id": cad_example.trip_id,
+                "hastus_trip_id": hastus_example.trip_id,
+                "route_short_name": cad_example.route_short_name,
+                "direction_id": cad_example.direction_id,
+                "headsign": cad_example.headsign,
+                "first_time": cad_example.first_time,
+                "last_time": cad_example.last_time,
+            },
         )
 
     report.stats["trip_reconciliation"] = {
@@ -512,6 +521,10 @@ def _audit_stops(
                     file="CleverCAD/HASTUS:stops.txt",
                     key=f"{final_id} ↔ {hastus_id}",
                     observed=f"CAD: {cad_stop.get('stop_name', '')} | HASTUS: {hastus_stop.get('stop_name', '')}",
+                    context={
+                        "clevercad_stop_id": final_id,
+                        "hastus_stop_id": hastus_id,
+                    },
                 )
             distance = _distance_m(cad_stop, hastus_stop)
             if distance is not None and distance > 35:
@@ -525,6 +538,11 @@ def _audit_stops(
                     key=f"{final_id} ↔ {hastus_id}",
                     observed=f"{distance:.1f} m",
                     expected="≤ 35 m or an approved exception",
+                    context={
+                        "clevercad_stop_id": final_id,
+                        "hastus_stop_id": hastus_id,
+                        "distance_m": round(distance, 1),
+                    },
                 )
 
         if final_stop is None:

@@ -6,6 +6,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from gtfs_validator.details import build_detail
 from gtfs_validator.engine import validate_feed
 from gtfs_validator.merge import validate_exports, validate_merge
 
@@ -111,6 +112,38 @@ class ValidatorTests(unittest.TestCase):
             write_feed(final_path, extra={"stop_times.txt": changed})
             report = validate_merge(cad_path, hastus_path, final_path)
             self.assertTrue(any(item.rule_id == "TRP101" for item in report.findings))
+
+    def test_stop_finding_opens_source_records_and_map_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\n10017,EB935,ST-LAURENT D,45.422,-75.638\n"
+            hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\nEB935,3025,ST-LAURENT A,45.423,-75.639\n"
+            write_feed(cad_path, extra={"stops.txt": cad_stops})
+            write_feed(hastus_path, extra={"stops.txt": hastus_stops})
+            report = validate_exports(cad_path, hastus_path)
+            finding = next(item.to_dict() for item in report.findings if item.rule_id == "STP005")
+            detail = build_detail(finding, str(cad_path), str(hastus_path))
+            self.assertEqual("stop", detail["type"])
+            self.assertEqual("10017", detail["clevercad"]["stop_id"])
+            self.assertEqual("EB935", detail["hastus"]["stop_id"])
+            self.assertGreater(detail["distance_m"], 0)
+
+    def test_trip_finding_opens_side_by_side_stop_sequences(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\n10017,EB935,ST-LAURENT D,45.422,-75.638\n20000,PX100,PARLIAMENT A,45.423,-75.700\n"
+            hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\nEB935,3025,ST-LAURENT D,45.422,-75.638\nPX100,3000,PARLIAMENT A,45.423,-75.700\n"
+            hastus_times = FILES["stop_times.txt"].replace("10017,1", "PX100,1").replace("20000,2", "EB935,2")
+            write_feed(cad_path, extra={"stops.txt": cad_stops})
+            write_feed(hastus_path, extra={"stops.txt": hastus_stops, "stop_times.txt": hastus_times})
+            report = validate_exports(cad_path, hastus_path)
+            finding = next(item.to_dict() for item in report.findings if item.rule_id == "TRP102")
+            detail = build_detail(finding, str(cad_path), str(hastus_path))
+            self.assertEqual("trip", detail["type"])
+            self.assertEqual(["CleverCAD", "HASTUS"], [side["label"] for side in detail["sides"]])
+            self.assertEqual(2, len(detail["differences"]))
 
 
 if __name__ == "__main__":

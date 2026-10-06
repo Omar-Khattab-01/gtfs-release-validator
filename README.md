@@ -82,11 +82,16 @@ When the optional final feed is supplied, it additionally detects:
 - stop coordinates and route colours
 - stop-time syntax, arrival/departure order, duplicate sequences, and nondecreasing trip times
 - orphan shapes
-- searchable browser findings and JSON/CSV report downloads
+- grouped issue cards and progressive loading so large reports remain navigable
+- clickable evidence drawers with full source stop records
+- offline coordinate maps for mapped-stop location disagreements
+- side-by-side stop sequences for trip-pattern disagreements
+- selection exports and a purpose-built affected-stops CSV
+- searchable findings and complete JSON/CSV report downloads
 
 ## Current next steps
 
-The next comparison layer will reconcile complete trip patterns across CleverCAD and HASTUS after translating stop identifiers, compare service on actual operating dates, identify duplicate passenger journeys, and measure stop-to-shape alignment. These remain generic source-consistency checks rather than rules tied to a particular route or incident.
+The next comparison layers are calendar expansion on actual operating dates, duplicate passenger-journey detection, and stop-to-shape alignment. These remain generic source-consistency checks rather than rules tied to a particular route or incident.
 
 ## Privacy and safety
 

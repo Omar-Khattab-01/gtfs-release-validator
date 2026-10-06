@@ -61,22 +61,25 @@
 
       <section class="panel">
         <div class="section-heading">
-          <div><span class="step">02</span><h3>Findings</h3></div>
+          <div><span class="step">02</span><h3>Investigation centre</h3></div>
           <div class="actions"><a id="csv-link" class="button secondary">Export CSV</a><a id="json-link" class="button secondary">Export JSON</a></div>
         </div>
+        <div class="issue-groups" id="issue-groups"></div>
         <div class="toolbar">
           <label class="search"><span>Search</span><input id="search" type="search" placeholder="Rule, file, trip, message…"></label>
           <label><span>Severity</span><select id="severity-filter"><option value="">All severities</option><option>blocker</option><option>error</option><option>warning</option><option>info</option></select></label>
           <label><span>Category</span><select id="category-filter"><option value="">All categories</option></select></label>
           <span class="result-count" id="result-count"></span>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Severity</th><th>Rule</th><th>Finding</th><th>Location</th><th>Evidence</th></tr></thead>
-            <tbody id="findings-body"></tbody>
-          </table>
+        <div class="selection-bar">
+          <span><strong id="selected-count">0</strong> selected</span>
+          <button type="button" class="button secondary" id="export-selected">Export selected</button>
+          <button type="button" class="button secondary" id="export-stops">Export filtered stops</button>
+          <button type="button" class="text-button" id="clear-selection">Clear selection</button>
         </div>
+        <div class="findings-list" id="findings-list"></div>
         <div class="empty hidden" id="empty-state">No findings match these filters.</div>
+        <div class="load-more-wrap"><button type="button" class="button secondary hidden" id="load-more">Show more findings</button></div>
       </section>
 
       <section class="lower-grid">
@@ -91,7 +94,16 @@
       </section>
     </section>
   </main>
-  <footer><span>GTFS Merge Auditor 0.2</span><span>Bound to localhost · no network services</span></footer>
+  <div class="drawer-backdrop hidden" id="drawer-backdrop">
+    <aside class="detail-drawer" id="detail-drawer" aria-labelledby="detail-title">
+      <div class="drawer-header">
+        <div><p class="eyebrow">Finding evidence</p><h2 id="detail-title">Investigation details</h2></div>
+        <button type="button" class="close-button" id="close-drawer" aria-label="Close details">×</button>
+      </div>
+      <div class="drawer-body" id="drawer-body"></div>
+    </aside>
+  </div>
+  <footer><span>GTFS Merge Auditor 0.3</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

@@ -71,6 +71,59 @@ button:hover { background: var(--red-dark); }
 .toolbar label span { display: block; margin-bottom: 4px; color: var(--muted); }
 .result-count { padding: 12px 0; color: var(--muted); font-size: 12px; text-align: right; }
 .actions { display: flex !important; gap: 8px !important; }
+.issue-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 20px 22px 4px; }
+.issue-group { min-height: 132px; padding: 17px; border: 1px solid var(--line); border-top: 4px solid var(--navy); background: #fbfbf9; text-align: left; color: var(--ink); cursor: pointer; }
+.issue-group:hover, .issue-group.active { border-color: var(--red); background: #fff8f7; }
+.issue-group .group-top { display: flex; justify-content: space-between; gap: 12px; }
+.issue-group strong { font: 700 17px/1.2 Georgia, serif; }
+.issue-group .group-count { color: var(--red); font: 800 23px/1 monospace; }
+.issue-group p { margin: 9px 0 0; color: var(--muted); font-size: 12px; }
+.selection-bar { min-height: 50px; display: flex; align-items: center; gap: 10px; padding: 8px 22px; border-top: 1px solid var(--line); background: #f8f7f3; }
+.selection-bar > span { margin-right: auto; color: var(--muted); font-size: 12px; }
+.text-button { padding: 7px 4px; color: var(--muted); background: transparent; font-size: 12px; }
+.text-button:hover { color: var(--red); background: transparent; }
+.findings-list { border-top: 1px solid var(--line); }
+.finding-card { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: start; padding: 17px 22px; border-bottom: 1px solid #e8e6e0; }
+.finding-card:hover { background: #fcfbf8; }
+.finding-select { margin-top: 4px; width: 16px; height: 16px; accent-color: var(--red); }
+.finding-open { display: block; width: 100%; padding: 0; color: var(--ink); background: transparent; text-align: left; font-weight: 400; }
+.finding-open:hover { background: transparent; }
+.finding-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.finding-key { color: var(--muted); font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.finding-card h4 { margin: 0; font: 700 16px/1.25 Georgia, serif; }
+.finding-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
+.preview-value { min-width: 0; padding: 8px 10px; border-left: 3px solid #a8b6bf; background: #f1f3f3; color: #34434d; font-size: 12px; overflow-wrap: anywhere; }
+.preview-value.hastus { border-left-color: var(--red); background: #fff3f1; }
+.view-evidence { align-self: center; color: var(--red); white-space: nowrap; font-size: 12px; font-weight: 800; }
+.load-more-wrap { padding: 18px; text-align: center; }
+.drawer-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; justify-content: flex-end; background: rgba(7,18,25,.42); backdrop-filter: blur(2px); }
+.detail-drawer { width: min(920px, 94vw); height: 100%; overflow: auto; background: var(--paper); box-shadow: -18px 0 50px rgba(0,0,0,.22); }
+.drawer-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 22px 26px; color: white; background: var(--navy); border-bottom: 4px solid var(--red); }
+.drawer-header h2 { margin: 2px 0 0; font: 700 25px/1.1 Georgia, serif; }
+.close-button { padding: 0; width: 42px; height: 42px; border: 1px solid rgba(255,255,255,.3); border-radius: 50%; background: transparent; font-size: 28px; line-height: 1; }
+.drawer-body { padding: 24px 26px 48px; }
+.detail-intro { margin-bottom: 20px; padding: 15px 17px; background: white; border-left: 4px solid var(--red); }
+.detail-intro p { margin: 5px 0 0; color: var(--muted); }
+.source-grid, .trip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.source-card, .trip-side, .map-card { overflow: hidden; background: white; border: 1px solid var(--line); }
+.source-card h3, .trip-side h3, .map-card h3 { margin: 0; padding: 13px 16px; color: white; background: var(--navy); font-size: 14px; }
+.source-card.hastus h3, .trip-side.hastus h3 { background: var(--red-dark); }
+.field-list { margin: 0; }
+.field-list div { display: grid; grid-template-columns: 120px 1fr; gap: 12px; padding: 9px 14px; border-top: 1px solid #eeece7; }
+.field-list dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.field-list dd { margin: 0; overflow-wrap: anywhere; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.map-card { margin-top: 14px; }
+.mini-map { display: block; width: 100%; height: 300px; background: #edf1ef; }
+.map-legend { display: flex; gap: 20px; padding: 11px 14px; color: var(--muted); font-size: 12px; }
+.legend-dot { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 50%; background: var(--navy); }
+.legend-dot.hastus { background: var(--red); }
+.trip-context { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
+.trip-context span { padding: 5px 9px; border-radius: 999px; background: white; border: 1px solid var(--line); font-size: 11px; }
+.trip-side { max-height: 560px; overflow: auto; }
+.trip-side table { min-width: 560px; font-size: 11px; }
+.trip-side tr.changed { background: #fff0d9; }
+.loading-detail { padding: 70px 20px; text-align: center; color: var(--muted); }
+.loading-detail .spinner { margin: 0 auto 14px; }
 .table-wrap { overflow: auto; border-top: 1px solid var(--line); }
 table { width: 100%; border-collapse: collapse; min-width: 920px; }
 th { padding: 11px 14px; color: var(--muted); background: #f3f4f3; text-align: left; text-transform: uppercase; letter-spacing: .07em; font-size: 10px; }
@@ -100,4 +153,9 @@ footer { max-width: 1240px; margin: 0 auto; padding: 22px 28px; display: flex; j
   .search { grid-column: 1 / -1; }
   .decision-strip { align-items: flex-start; gap: 14px; flex-direction: column; }
   .run-meta { max-width: 100%; text-align: left; }
+  .issue-groups, .source-grid, .trip-grid { grid-template-columns: 1fr; }
+  .finding-card { grid-template-columns: 28px 1fr; }
+  .view-evidence { grid-column: 2; }
+  .finding-preview { grid-template-columns: 1fr; }
+  .selection-bar { align-items: stretch; flex-wrap: wrap; }
 }

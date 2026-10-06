@@ -7,6 +7,7 @@ import mimetypes
 import threading
 import uuid
 import webbrowser
+import zipfile
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .details import build_detail
 from .merge import validate_merge
 
 
@@ -31,6 +33,7 @@ class Job:
     status: str = "queued"
     error: str | None = None
     report: dict[str, Any] | None = None
+    details_cache: dict[int, dict[str, Any]] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def public(self) -> dict[str, Any]:
@@ -72,7 +75,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.2"
+    server_version = "GTFSValidator/0.3"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -130,6 +133,36 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 if payload.get("report") is None:
                     return self._json(HTTPStatus.CONFLICT, {"error": "Report is not ready"})
                 return self._download_csv(payload["report"], job.id)
+            if len(parts) == 5 and parts[3] == "details":
+                try:
+                    finding_index = int(parts[4])
+                except ValueError:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid finding index"})
+                payload = job.public()
+                report = payload.get("report")
+                if report is None:
+                    return self._json(HTTPStatus.CONFLICT, {"error": "Report is not ready"})
+                findings = report.get("findings", [])
+                if finding_index < 0 or finding_index >= len(findings):
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown finding"})
+                with job.lock:
+                    cached = job.details_cache.get(finding_index)
+                if cached is None:
+                    try:
+                        cached = build_detail(
+                            findings[finding_index],
+                            job.clevercad_path,
+                            job.hastus_path,
+                            job.final_path,
+                        )
+                    except (OSError, KeyError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile) as exc:
+                        return self._json(
+                            HTTPStatus.UNPROCESSABLE_ENTITY,
+                            {"error": f"Could not load detail evidence: {exc}"},
+                        )
+                    with job.lock:
+                        job.details_cache[finding_index] = cached
+                return self._json(HTTPStatus.OK, cached)
         return self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:
