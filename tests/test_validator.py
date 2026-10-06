@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 
 from gtfs_validator.engine import validate_feed
+from gtfs_validator.merge import validate_merge
 
 
 FILES = {
@@ -22,9 +23,8 @@ FILES = {
 }
 
 
-def write_feed(path: Path, *, mode: int = 0o644, first_stop: str = "10017", extra: dict[str, str] | None = None) -> None:
+def write_feed(path: Path, *, mode: int = 0o644, extra: dict[str, str] | None = None) -> None:
     files = dict(FILES)
-    files["stop_times.txt"] = files["stop_times.txt"].replace("10017,1", f"{first_stop},1")
     if extra:
         files.update(extra)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -53,16 +53,23 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual("BLOCKED", report.decision)
             self.assertTrue(any(item.rule_id == "PKG009" for item in report.findings))
 
-    def test_route_19_wrong_first_stop_is_targeted(self) -> None:
+    def test_source_stop_disagreement_is_generic(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "route19.zip"
-            write_feed(path, first_stop="10014")
-            report = validate_feed(path)
-            findings = [item for item in report.findings if item.rule_id == "OCT001"]
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            final_path = Path(temp_dir) / "final.zip"
+            cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon,location_type,parent_station,wheelchair_boarding\n10017,EB935,ST-LAURENT D,45.422,-75.638,0,,0\n20000,PX100,PARLIAMENT A,45.423,-75.700,0,,0\n"
+            hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon,location_type,parent_station,wheelchair_boarding\nEB935,3025,ST-LAURENT A,45.422,-75.638,0,,0\nPX100,3000,PARLIAMENT A,45.423,-75.700,0,,0\n"
+            final_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon,location_type,parent_station,wheelchair_boarding\n10017,3025,ST-LAURENT D,45.422,-75.638,0,,0\n20000,3000,PARLIAMENT A,45.423,-75.700,0,,0\n"
+            write_feed(cad_path, extra={"stops.txt": cad_stops})
+            write_feed(hastus_path, extra={"stops.txt": hastus_stops})
+            write_feed(final_path, extra={"stops.txt": final_stops})
+            report = validate_merge(cad_path, hastus_path, final_path)
+            findings = [item for item in report.findings if item.rule_id == "STP005"]
             self.assertEqual(1, len(findings))
-            self.assertEqual("10014", findings[0].observed)
-            self.assertEqual("10017", findings[0].expected)
-            self.assertEqual("t1", findings[0].key)
+            self.assertIn("ST-LAURENT D", findings[0].observed or "")
+            self.assertIn("ST-LAURENT A", findings[0].observed or "")
+            self.assertEqual("10017 ↔ EB935", findings[0].key)
 
     def test_nested_member_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -78,6 +85,18 @@ class ValidatorTests(unittest.TestCase):
             write_feed(path, extra={"stop_times.txt": bad_times})
             report = validate_feed(path)
             self.assertTrue(any(item.rule_id == "TIME005" for item in report.findings))
+
+    def test_final_trip_schedule_is_compared_with_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            final_path = Path(temp_dir) / "final.zip"
+            write_feed(cad_path)
+            write_feed(hastus_path)
+            changed = FILES["stop_times.txt"].replace("25:15:00,25:15:00", "25:16:00,25:16:00")
+            write_feed(final_path, extra={"stop_times.txt": changed})
+            report = validate_merge(cad_path, hastus_path, final_path)
+            self.assertTrue(any(item.rule_id == "TRP101" for item in report.findings))
 
 
 if __name__ == "__main__":

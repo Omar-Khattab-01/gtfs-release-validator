@@ -29,7 +29,7 @@ class Finding:
 @dataclass
 class ValidationReport:
     source_path: str
-    tool_version: str = "0.1.0"
+    tool_version: str = "0.2.0"
     profile: str = "oc-transpo"
     started_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

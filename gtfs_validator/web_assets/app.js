@@ -1,5 +1,7 @@
 const form = document.querySelector('#run-form');
-const pathInput = document.querySelector('#candidate-path');
+const clevercadInput = document.querySelector('#clevercad-path');
+const hastusInput = document.querySelector('#hastus-path');
+const finalInput = document.querySelector('#final-path');
 const runButton = document.querySelector('#run-button');
 const runningPanel = document.querySelector('#running-panel');
 const results = document.querySelector('#results');
@@ -21,7 +23,11 @@ form.addEventListener('submit', async (event) => {
     const response = await fetch('/api/runs', {
       method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-GTFS-Validator': '1'},
-      body: JSON.stringify({candidate_path: pathInput.value.trim()})
+      body: JSON.stringify({
+        clevercad_path: clevercadInput.value.trim(),
+        hastus_path: hastusInput.value.trim(),
+        final_path: finalInput.value.trim()
+      })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Could not start validation');
@@ -63,7 +69,23 @@ function renderReport(report, id) {
   const categories = [...new Set(activeFindings.map(f => f.category))].sort();
   categoryFilter.innerHTML = '<option value="">All categories</option>' + categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
   renderFindings();
-  document.querySelector('#inventory').innerHTML = Object.entries(report.stats).filter(([key]) => key !== 'extracted_permissions').map(([key,value]) => `<div class="inventory-row"><span>${escapeHtml(key.replaceAll('_',' '))}</span><strong>${escapeHtml(value)}</strong></div>`).join('') || '<p class="quiet">No feed statistics available.</p>';
+  const inventoryRows = [];
+  for (const [key, value] of Object.entries(report.stats)) {
+    if (key === 'extracted_permissions') continue;
+    if (key === 'inputs' && value && typeof value === 'object') {
+      inventoryRows.push(['input archives', Object.keys(value).length]);
+      continue;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [childKey, childValue] of Object.entries(value)) {
+        if (childValue == null || typeof childValue === 'object') continue;
+        inventoryRows.push([`${key} · ${childKey}`, childValue]);
+      }
+      continue;
+    }
+    inventoryRows.push([key, value]);
+  }
+  document.querySelector('#inventory').innerHTML = inventoryRows.map(([key,value]) => `<div class="inventory-row"><span>${escapeHtml(key.replaceAll('_',' '))}</span><strong>${escapeHtml(value)}</strong></div>`).join('') || '<p class="quiet">No feed statistics available.</p>';
   const files = Object.entries(report.files);
   document.querySelector('#packaging').innerHTML = `<div class="package-row"><span>Archive size</span><strong>${formatBytes(report.archive_size)}</strong></div><div class="package-row"><span>Members inspected</span><strong>${files.length}</strong></div><div class="package-row"><span>Members stored as 0644</span><strong>${files.filter(([,v]) => v.stored_mode === '644').length} / ${files.length}</strong></div><div class="package-row"><span>System extraction tested</span><strong>${report.stats.extracted_permissions ? 'Yes' : 'Unavailable'}</strong></div>`;
   results.scrollIntoView({behavior: 'smooth', block: 'start'});

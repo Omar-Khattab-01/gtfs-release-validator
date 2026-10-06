@@ -6,6 +6,7 @@ import json
 import mimetypes
 import threading
 import uuid
+import webbrowser
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .engine import validate_feed
+from .merge import validate_merge
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -24,7 +25,9 @@ MAX_REQUEST_BYTES = 64 * 1024
 @dataclass
 class Job:
     id: str
-    candidate_path: str
+    clevercad_path: str
+    hastus_path: str
+    final_path: str
     status: str = "queued"
     error: str | None = None
     report: dict[str, Any] | None = None
@@ -34,7 +37,9 @@ class Job:
         with self.lock:
             payload: dict[str, Any] = {
                 "id": self.id,
-                "candidate_path": self.candidate_path,
+                "clevercad_path": self.clevercad_path,
+                "hastus_path": self.hastus_path,
+                "final_path": self.final_path,
                 "status": self.status,
                 "error": self.error,
             }
@@ -51,7 +56,7 @@ def _run_job(job: Job) -> None:
     with job.lock:
         job.status = "running"
     try:
-        report = validate_feed(job.candidate_path)
+        report = validate_merge(job.clevercad_path, job.hastus_path, job.final_path)
         with job.lock:
             job.report = report.to_dict()
             job.status = "complete"
@@ -67,7 +72,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.1"
+    server_version = "GTFSValidator/0.2"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -142,11 +147,18 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid JSON"})
-        candidate_path = str(payload.get("candidate_path", "")).strip()
-        if not candidate_path:
-            return self._json(HTTPStatus.BAD_REQUEST, {"error": "Candidate ZIP path is required"})
+        clevercad_path = str(payload.get("clevercad_path", "")).strip()
+        hastus_path = str(payload.get("hastus_path", "")).strip()
+        final_path = str(payload.get("final_path", "")).strip()
+        if not all((clevercad_path, hastus_path, final_path)):
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": "All three ZIP paths are required"})
 
-        job = Job(id=uuid.uuid4().hex[:12], candidate_path=candidate_path)
+        job = Job(
+            id=uuid.uuid4().hex[:12],
+            clevercad_path=clevercad_path,
+            hastus_path=hastus_path,
+            final_path=final_path,
+        )
         with JOBS_LOCK:
             JOBS[job.id] = job
         worker = threading.Thread(target=_run_job, args=(job,), daemon=True)
@@ -189,10 +201,12 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         )
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
+def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False) -> None:
     server = ThreadingHTTPServer((host, port), ValidatorHandler)
     print(f"GTFS Validator is available at http://{host}:{port}")
     print("Press Ctrl+C to stop. Files stay on this computer.")
+    if open_browser:
+        threading.Timer(0.4, webbrowser.open, args=(f"http://{host}:{port}",)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

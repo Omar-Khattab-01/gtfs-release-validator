@@ -403,7 +403,6 @@ def _process_stop_times(
     report: ValidationReport,
     trip_ids: set[str],
     stop_ids: set[str],
-    route_19_parliament_trips: set[str],
 ) -> None:
     file_name = "stop_times.txt"
     if file_name not in archive.namelist():
@@ -416,7 +415,6 @@ def _process_stop_times(
         return
 
     row_count = 0
-    first_stops: dict[str, tuple[int, str, int]] = {}
     with tempfile.TemporaryDirectory(prefix="gtfs-validator-db-") as temp_dir:
         connection = sqlite3.connect(str(Path(temp_dir) / "stop_times.sqlite3"))
         connection.execute("PRAGMA journal_mode=OFF")
@@ -505,9 +503,6 @@ def _process_stop_times(
                     key=f"{trip_id}:{sequence}",
                     observed=f"{arrival_text} → {departure_text}",
                 )
-            current_first = first_stops.get(trip_id)
-            if current_first is None or sequence < current_first[0]:
-                first_stops[trip_id] = (sequence, stop_id, row_number)
             try:
                 connection.execute(
                     "INSERT INTO stop_times VALUES (?, ?, ?, ?, ?, ?)",
@@ -554,22 +549,6 @@ def _process_stop_times(
                 previous_departure = arrival
         connection.close()
 
-    for trip_id in sorted(route_19_parliament_trips):
-        first = first_stops.get(trip_id)
-        if first and first[1] == "10014":
-            report.add(
-                "OCT001",
-                "blocker",
-                "OC Transpo rules",
-                "Route 19 Parliament trip starts at St-Laurent A",
-                "The Parliament-bound Route 19 short-origin pattern must start at ST-LAURENT D (10017), not ST-LAURENT A (10014).",
-                file=file_name,
-                row=first[2],
-                key=trip_id,
-                observed="10014",
-                expected="10017",
-                context={"stop_sequence": first[0]},
-            )
     report.files.setdefault(file_name, {})["rows"] = row_count
 
 
@@ -624,15 +603,9 @@ def validate_feed(path: str | Path, profile: str = "oc-transpo") -> ValidationRe
         }
         trip_ids = {row.get("trip_id", "").strip() for row in trip_rows}
         service_ids = {row.get("service_id", "").strip() for row in calendar_rows + calendar_date_rows}
-        route_short_names = {
-            row.get("route_id", "").strip(): row.get("route_short_name", "").strip()
-            for row in route_rows
-        }
-
         _check_routes(route_rows, report)
         _check_stops(stop_rows, stop_ids, stop_types, report)
 
-        route_19_parliament_trips: set[str] = set()
         for row_number, row in enumerate(trip_rows, start=2):
             trip_id = row.get("trip_id", "").strip()
             route_id = row.get("route_id", "").strip()
@@ -671,15 +644,11 @@ def validate_feed(path: str | Path, profile: str = "oc-transpo") -> ValidationRe
                     row=row_number,
                     key=trip_id,
                 )
-            if route_short_names.get(route_id) == "19" and "parliament" in row.get("trip_headsign", "").casefold():
-                route_19_parliament_trips.add(trip_id)
-
         _process_stop_times(
             archive,
             report,
             trip_ids,
             stop_ids,
-            route_19_parliament_trips,
         )
 
         used_shape_ids = {row.get("shape_id", "").strip() for row in trip_rows if row.get("shape_id", "").strip()}

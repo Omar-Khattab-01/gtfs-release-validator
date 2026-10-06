@@ -37,7 +37,9 @@ main { max-width: 1240px; margin: 0 auto; padding: 54px 28px 72px; }
 .quiet { color: var(--muted); font-size: 12px; }
 form { margin-top: 24px; }
 label { font-size: 12px; font-weight: 750; letter-spacing: .03em; }
-.path-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 7px; }
+.input-stack { display: grid; gap: 14px; }
+.input-stack label { display: grid; grid-template-columns: 210px 1fr; align-items: center; gap: 14px; }
+.submit-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-top: 18px; }
 input, select { width: 100%; border: 1px solid #b9bec2; border-radius: 2px; background: white; color: var(--ink); padding: 12px 13px; font: inherit; }
 input:focus, select:focus { outline: 3px solid rgba(197,32,47,.15); border-color: var(--red); }
 button, .button { border: 0; border-radius: 2px; padding: 12px 18px; background: var(--red); color: white; font-weight: 800; text-decoration: none; cursor: pointer; }
@@ -90,7 +92,8 @@ footer { max-width: 1240px; margin: 0 auto; padding: 22px 28px; display: flex; j
 @media (max-width: 800px) {
   .hero, .lower-grid { grid-template-columns: 1fr; }
   .scope-card { display: none; }
-  .path-row { grid-template-columns: 1fr; }
+  .input-stack label { grid-template-columns: 1fr; gap: 5px; }
+  .submit-row { align-items: stretch; flex-direction: column; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .toolbar { grid-template-columns: 1fr 1fr; }
   .search { grid-column: 1 / -1; }

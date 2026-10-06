@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OC Transpo GTFS Release Validator</title>
+  <title>OC Transpo GTFS Merge Auditor</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/assets/app.css">
 </head>
@@ -12,7 +12,7 @@
     <div class="brand-mark" aria-hidden="true"><span>OC</span></div>
     <div>
       <p class="eyebrow">Release assurance · local device</p>
-      <h1>GTFS Release Validator</h1>
+      <h1>GTFS Merge Auditor</h1>
     </div>
     <div class="privacy-badge"><span class="status-dot"></span> Offline processing</div>
   </header>
@@ -22,33 +22,33 @@
       <div>
         <p class="kicker">Pre-publication control</p>
         <h2>Validate the artifact riders will actually receive.</h2>
-        <p class="lede">Inspect GTFS structure, relationships, schedules, OC Transpo rules, and ZIP permissions without sending the feed anywhere.</p>
+      <p class="lede">Reconcile CleverCAD and HASTUS, then validate that the merged GTFS preserves the correct source data—without sending a feed anywhere.</p>
       </div>
       <div class="scope-card">
-        <span>Phase 1 scope</span>
-        <strong>Final feed certification</strong>
-        <small>Baseline and source reconciliation are next.</small>
+        <span>Audit scope</span>
+        <strong>Three-feed reconciliation</strong>
+        <small>Source differences plus final release validation.</small>
       </div>
     </section>
 
     <section class="panel setup-panel" id="setup-panel">
       <div class="section-heading">
-        <div><span class="step">01</span><h3>Select candidate</h3></div>
-        <span class="quiet">ZIP remains read-only</span>
+        <div><span class="step">01</span><h3>Select the three exports</h3></div>
+        <span class="quiet">All ZIPs remain read-only</span>
       </div>
       <form id="run-form">
-        <label for="candidate-path">Candidate GTFS ZIP path</label>
-        <div class="path-row">
-          <input id="candidate-path" name="candidate_path" type="text" required autocomplete="off" spellcheck="false" placeholder="/path/to/GTFSExport.zip">
-          <button type="submit" id="run-button">Run validation</button>
+        <div class="input-stack">
+          <label for="clevercad-path">CleverCAD export ZIP<input id="clevercad-path" name="clevercad_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\CW-EXPORT.zip"></label>
+          <label for="hastus-path">HASTUS export ZIP<input id="hastus-path" name="hastus_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\HASTUS-EXPORT.zip"></label>
+          <label for="final-path">Final merged GTFS ZIP<input id="final-path" name="final_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\FINAL-MERGED.zip"></label>
         </div>
-        <p class="field-help">Paste the full local path. Browser file uploads are intentionally avoided so multi-gigabyte feeds are never copied into memory.</p>
+        <div class="submit-row"><p class="field-help">Use full Windows paths. Large feeds are read directly from disk instead of uploaded through the browser.</p><button type="submit" id="run-button">Run merge audit</button></div>
       </form>
     </section>
 
     <section class="running panel hidden" id="running-panel" aria-live="polite">
       <div class="spinner" aria-hidden="true"></div>
-      <div><strong>Validation in progress</strong><p>Checking the archive, tables, relationships, and scheduled stop sequences.</p></div>
+      <div><strong>Merge audit in progress</strong><p>Validating the final artifact and tracing stops, routes, trips, shapes, and services to both source exports.</p></div>
     </section>
 
     <section id="results" class="hidden">
@@ -91,7 +91,7 @@
       </section>
     </section>
   </main>
-  <footer><span>GTFS Validator 0.1</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.2</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>
