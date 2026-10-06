@@ -22,10 +22,10 @@ def main() -> None:
     validate.add_argument("zip_path")
     validate.add_argument("--output", help="write the JSON report to this path")
 
-    audit = subparsers.add_parser("audit", help="reconcile CleverCAD, HASTUS, and the merged GTFS")
+    audit = subparsers.add_parser("audit", help="reconcile CleverCAD and HASTUS, optionally checking the merged GTFS")
     audit.add_argument("clevercad_zip")
     audit.add_argument("hastus_zip")
-    audit.add_argument("final_zip")
+    audit.add_argument("final_zip", nargs="?", help="optional final merged GTFS ZIP")
     audit.add_argument("--output", help="write the JSON report to this path")
 
     args = parser.parse_args()

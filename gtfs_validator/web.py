@@ -27,7 +27,7 @@ class Job:
     id: str
     clevercad_path: str
     hastus_path: str
-    final_path: str
+    final_path: str = ""
     status: str = "queued"
     error: str | None = None
     report: dict[str, Any] | None = None
@@ -150,8 +150,8 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         clevercad_path = str(payload.get("clevercad_path", "")).strip()
         hastus_path = str(payload.get("hastus_path", "")).strip()
         final_path = str(payload.get("final_path", "")).strip()
-        if not all((clevercad_path, hastus_path, final_path)):
-            return self._json(HTTPStatus.BAD_REQUEST, {"error": "All three ZIP paths are required"})
+        if not clevercad_path or not hastus_path:
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": "CleverCAD and HASTUS ZIP paths are required"})
 
         job = Job(
             id=uuid.uuid4().hex[:12],

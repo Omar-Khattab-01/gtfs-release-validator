@@ -22,33 +22,33 @@
       <div>
         <p class="kicker">Pre-publication control</p>
         <h2>Validate the artifact riders will actually receive.</h2>
-      <p class="lede">Reconcile CleverCAD and HASTUS, then validate that the merged GTFS preserves the correct source data—without sending a feed anywhere.</p>
+      <p class="lede">Check CleverCAD against HASTUS before vendor submission. Add the final merged GTFS later when you want to verify what the vendor produced.</p>
       </div>
       <div class="scope-card">
-        <span>Audit scope</span>
-        <strong>Three-feed reconciliation</strong>
-        <small>Source differences plus final release validation.</small>
+        <span>Primary gate</span>
+        <strong>Source preflight</strong>
+        <small>Final merged-feed verification is optional.</small>
       </div>
     </section>
 
     <section class="panel setup-panel" id="setup-panel">
       <div class="section-heading">
-        <div><span class="step">01</span><h3>Select the three exports</h3></div>
-        <span class="quiet">All ZIPs remain read-only</span>
+        <div><span class="step">01</span><h3>Select source exports</h3></div>
+        <span class="quiet">CleverCAD + HASTUS required</span>
       </div>
       <form id="run-form">
         <div class="input-stack">
-          <label for="clevercad-path">CleverCAD export ZIP<input id="clevercad-path" name="clevercad_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\CW-EXPORT.zip"></label>
-          <label for="hastus-path">HASTUS export ZIP<input id="hastus-path" name="hastus_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\HASTUS-EXPORT.zip"></label>
-          <label for="final-path">Final merged GTFS ZIP<input id="final-path" name="final_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\FINAL-MERGED.zip"></label>
+          <label for="clevercad-path"><span class="label-title">CleverCAD export ZIP</span><input id="clevercad-path" name="clevercad_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\CW-EXPORT.zip"></label>
+          <label for="hastus-path"><span class="label-title">HASTUS export ZIP</span><input id="hastus-path" name="hastus_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\HASTUS-EXPORT.zip"></label>
+          <label for="final-path"><span class="label-title">Final merged GTFS ZIP <span class="optional">Optional</span></span><input id="final-path" name="final_path" type="text" autocomplete="off" spellcheck="false" placeholder="Add later to verify the vendor output"></label>
         </div>
-        <div class="submit-row"><p class="field-help">Use full Windows paths. Large feeds are read directly from disk instead of uploaded through the browser.</p><button type="submit" id="run-button">Run merge audit</button></div>
+        <div class="submit-row"><p class="field-help">Use full Windows paths. Leave the final field empty for the pre-vendor source check.</p><button type="submit" id="run-button">Run source preflight</button></div>
       </form>
     </section>
 
     <section class="running panel hidden" id="running-panel" aria-live="polite">
       <div class="spinner" aria-hidden="true"></div>
-      <div><strong>Merge audit in progress</strong><p>Validating the final artifact and tracing stops, routes, trips, shapes, and services to both source exports.</p></div>
+      <div><strong>Export audit in progress</strong><p>Comparing source stop identities, trip patterns, schedules, and metadata. The final artifact is checked only when supplied.</p></div>
     </section>
 
     <section id="results" class="hidden">

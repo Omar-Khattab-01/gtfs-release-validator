@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 from gtfs_validator.engine import validate_feed
-from gtfs_validator.merge import validate_merge
+from gtfs_validator.merge import validate_exports, validate_merge
 
 
 FILES = {
@@ -70,6 +70,20 @@ class ValidatorTests(unittest.TestCase):
             self.assertIn("ST-LAURENT D", findings[0].observed or "")
             self.assertIn("ST-LAURENT A", findings[0].observed or "")
             self.assertEqual("10017 ↔ EB935", findings[0].key)
+
+    def test_final_feed_is_optional_for_source_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon,location_type,parent_station,wheelchair_boarding\n10017,EB935,ST-LAURENT D,45.422,-75.638,0,,0\n20000,PX100,PARLIAMENT A,45.423,-75.700,0,,0\n"
+            hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon,location_type,parent_station,wheelchair_boarding\nEB935,3025,ST-LAURENT A,45.422,-75.638,0,,0\nPX100,3000,PARLIAMENT A,45.423,-75.700,0,,0\n"
+            write_feed(cad_path, extra={"stops.txt": cad_stops})
+            write_feed(hastus_path, extra={"stops.txt": hastus_stops})
+            report = validate_exports(cad_path, hastus_path)
+            self.assertEqual("oc-transpo-source-preflight", report.profile)
+            self.assertEqual(2, len(report.stats["inputs"]))
+            self.assertTrue(any(item.rule_id == "STP005" for item in report.findings))
+            self.assertFalse(any(item.rule_id.startswith("PKG") for item in report.findings))
 
     def test_nested_member_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

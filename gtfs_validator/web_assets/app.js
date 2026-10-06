@@ -60,7 +60,7 @@ function renderReport(report, id) {
   strip.className = 'decision-strip ' + (report.decision === 'BLOCKED' ? 'blocked' : report.decision.startsWith('ELIGIBLE') ? 'approved' : '');
   document.querySelector('#decision').textContent = report.decision;
   document.querySelector('#source-name').textContent = report.source_path;
-  document.querySelector('#hash').textContent = `SHA-256 ${report.sha256 || 'not available'}`;
+  document.querySelector('#hash').textContent = report.sha256 ? `Final SHA-256 ${report.sha256}` : 'Source archive hashes recorded in the exported report';
   document.querySelector('#csv-link').href = `/api/runs/${id}/findings.csv`;
   document.querySelector('#json-link').href = `/api/runs/${id}/report.json`;
   const counts = report.counts;
@@ -87,7 +87,9 @@ function renderReport(report, id) {
   }
   document.querySelector('#inventory').innerHTML = inventoryRows.map(([key,value]) => `<div class="inventory-row"><span>${escapeHtml(key.replaceAll('_',' '))}</span><strong>${escapeHtml(value)}</strong></div>`).join('') || '<p class="quiet">No feed statistics available.</p>';
   const files = Object.entries(report.files);
-  document.querySelector('#packaging').innerHTML = `<div class="package-row"><span>Archive size</span><strong>${formatBytes(report.archive_size)}</strong></div><div class="package-row"><span>Members inspected</span><strong>${files.length}</strong></div><div class="package-row"><span>Members stored as 0644</span><strong>${files.filter(([,v]) => v.stored_mode === '644').length} / ${files.length}</strong></div><div class="package-row"><span>System extraction tested</span><strong>${report.stats.extracted_permissions ? 'Yes' : 'Unavailable'}</strong></div>`;
+  document.querySelector('#packaging').innerHTML = report.profile === 'oc-transpo-source-preflight'
+    ? '<div class="package-row"><span>Final merged GTFS</span><strong>Not supplied</strong></div><p class="field-help">Final artifact and permission checks were skipped. Add the merged ZIP after the vendor produces it.</p>'
+    : `<div class="package-row"><span>Final archive size</span><strong>${formatBytes(report.archive_size)}</strong></div><div class="package-row"><span>Members inspected</span><strong>${files.length}</strong></div><div class="package-row"><span>Members stored as 0644</span><strong>${files.filter(([,v]) => v.stored_mode === '644').length} / ${files.length}</strong></div><div class="package-row"><span>System extraction tested</span><strong>${report.stats.extracted_permissions ? 'Yes' : 'Unavailable'}</strong></div>`;
   results.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 

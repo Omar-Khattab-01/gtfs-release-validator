@@ -39,6 +39,7 @@ form { margin-top: 24px; }
 label { font-size: 12px; font-weight: 750; letter-spacing: .03em; }
 .input-stack { display: grid; gap: 14px; }
 .input-stack label { display: grid; grid-template-columns: 210px 1fr; align-items: center; gap: 14px; }
+.optional { margin-left: 6px; padding: 2px 7px; border-radius: 999px; background: #e8ebed; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
 .submit-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-top: 18px; }
 input, select { width: 100%; border: 1px solid #b9bec2; border-radius: 2px; background: white; color: var(--ink); padding: 12px 13px; font: inherit; }
 input:focus, select:focus { outline: 3px solid rgba(197,32,47,.15); border-color: var(--red); }

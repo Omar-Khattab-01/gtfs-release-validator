@@ -324,61 +324,61 @@ def _trip_summaries(
 def _hastus_stop_translation(
     cad: SourceFeed,
     hastus: SourceFeed,
-    final: SourceFeed,
+    final: SourceFeed | None = None,
 ) -> dict[str, str]:
     cad_by_code = _group(cad.stops, "stop_code")
-    final_ids = {row.get("stop_id", "") for row in final.stops}
+    final_ids = {row.get("stop_id", "") for row in final.stops} if final else set()
     translation: dict[str, str] = {}
     for row in hastus.stops:
         hastus_id = row.get("stop_id", "")
-        if hastus_id in final_ids:
-            translation[hastus_id] = hastus_id
-            continue
         matches = cad_by_code.get(hastus_id, [])
-        if len(matches) == 1 and matches[0].get("stop_id", "") in final_ids:
+        if len(matches) == 1 and (not final or matches[0].get("stop_id", "") in final_ids):
             translation[hastus_id] = matches[0]["stop_id"]
+        elif final and hastus_id in final_ids:
+            translation[hastus_id] = hastus_id
     return translation
 
 
 def _audit_trip_patterns(
     cad_summaries: dict[str, list[TripSummary]],
     hastus_summaries: dict[str, list[TripSummary]],
-    final_summaries: dict[str, list[TripSummary]],
+    final_summaries: dict[str, list[TripSummary]] | None,
     report: ValidationReport,
 ) -> None:
-    for canonical_id, final_variants in final_summaries.items():
-        source_variants = cad_summaries.get(canonical_id, []) + hastus_summaries.get(canonical_id, [])
-        if not source_variants:
-            continue
-        for final_trip in final_variants:
-            if any(final_trip.schedule_fingerprint == source.schedule_fingerprint for source in source_variants):
+    if final_summaries is not None:
+        for canonical_id, final_variants in final_summaries.items():
+            source_variants = cad_summaries.get(canonical_id, []) + hastus_summaries.get(canonical_id, [])
+            if not source_variants:
                 continue
-            if any(final_trip.stop_fingerprint == source.stop_fingerprint for source in source_variants):
-                report.add(
-                    "TRP101",
-                    "error",
-                    "Trip reconciliation",
-                    "Merged trip schedule differs from its source",
-                    "The ordered stops match, but at least one time or pickup/drop-off value changed during the merge.",
-                    file="Final:stop_times.txt",
-                    key=final_trip.trip_id,
-                    observed=final_trip.schedule_fingerprint[:16],
-                    expected="one source schedule fingerprint",
-                    context={"source_trip_ids": [item.trip_id for item in source_variants[:10]]},
-                )
-            else:
-                report.add(
-                    "TRP100",
-                    "error",
-                    "Trip reconciliation",
-                    "Merged trip stop pattern differs from its source",
-                    "After translating stop identifiers, the final ordered stop sequence matches neither source record for this trip.",
-                    file="Final:stop_times.txt",
-                    key=final_trip.trip_id,
-                    observed=f"{final_trip.stop_count} stops · {final_trip.stop_fingerprint[:16]}",
-                    expected="one source stop-pattern fingerprint",
-                    context={"source_trip_ids": [item.trip_id for item in source_variants[:10]]},
-                )
+            for final_trip in final_variants:
+                if any(final_trip.schedule_fingerprint == source.schedule_fingerprint for source in source_variants):
+                    continue
+                if any(final_trip.stop_fingerprint == source.stop_fingerprint for source in source_variants):
+                    report.add(
+                        "TRP101",
+                        "error",
+                        "Trip reconciliation",
+                        "Merged trip schedule differs from its source",
+                        "The ordered stops match, but at least one time or pickup/drop-off value changed during the merge.",
+                        file="Final:stop_times.txt",
+                        key=final_trip.trip_id,
+                        observed=final_trip.schedule_fingerprint[:16],
+                        expected="one source schedule fingerprint",
+                        context={"source_trip_ids": [item.trip_id for item in source_variants[:10]]},
+                    )
+                else:
+                    report.add(
+                        "TRP100",
+                        "error",
+                        "Trip reconciliation",
+                        "Merged trip stop pattern differs from its source",
+                        "After translating stop identifiers, the final ordered stop sequence matches neither source record for this trip.",
+                        file="Final:stop_times.txt",
+                        key=final_trip.trip_id,
+                        observed=f"{final_trip.stop_count} stops · {final_trip.stop_fingerprint[:16]}",
+                        expected="one source stop-pattern fingerprint",
+                        context={"source_trip_ids": [item.trip_id for item in source_variants[:10]]},
+                    )
 
     def by_journey(summaries: dict[str, list[TripSummary]]) -> dict[tuple[str, str, str, str, str], list[TripSummary]]:
         grouped: dict[tuple[str, str, str, str, str], list[TripSummary]] = defaultdict(list)
@@ -413,17 +413,23 @@ def _audit_trip_patterns(
     report.stats["trip_reconciliation"] = {
         "clevercad_canonical_trips": len(cad_summaries),
         "hastus_canonical_trips": len(hastus_summaries),
-        "final_canonical_trips": len(final_summaries),
         "common_scheduled_journeys": len(set(cad_journeys) & set(hastus_journeys)),
         "source_pattern_disagreements": disagreement_count,
     }
+    if final_summaries is not None:
+        report.stats["trip_reconciliation"]["final_canonical_trips"] = len(final_summaries)
 
 
-def _audit_stops(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report: ValidationReport) -> None:
+def _audit_stops(
+    cad: SourceFeed,
+    hastus: SourceFeed,
+    final: SourceFeed | None,
+    report: ValidationReport,
+) -> None:
     cad_by_id = _index_unique(cad.stops, "stop_id")
     cad_by_code = _group(cad.stops, "stop_code")
     hastus_by_id = _index_unique(hastus.stops, "stop_id")
-    final_by_id = _index_unique(final.stops, "stop_id")
+    final_by_id = _index_unique(final.stops, "stop_id") if final else {}
 
     ambiguous_codes = {code: rows for code, rows in cad_by_code.items() if len(rows) > 1 and code in hastus_by_id}
     for code, rows in sorted(ambiguous_codes.items()):
@@ -441,8 +447,10 @@ def _audit_stops(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report:
 
     hastus_to_final = _hastus_stop_translation(cad, hastus, final)
 
-    for stop_id, cad_stop in sorted(cad_by_id.items()):
-        if stop_id not in final_by_id:
+    if final:
+        for stop_id, cad_stop in sorted(cad_by_id.items()):
+            if stop_id in final_by_id:
+                continue
             report.add(
                 "STP002",
                 "error" if stop_id in cad.used_stop_ids else "warning",
@@ -455,8 +463,9 @@ def _audit_stops(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report:
                 expected=cad_stop.get("stop_name", "source stop"),
             )
 
-    for stop_id, hastus_stop in sorted(hastus_by_id.items()):
-        if stop_id not in hastus_to_final:
+        for stop_id, hastus_stop in sorted(hastus_by_id.items()):
+            if stop_id in hastus_to_final:
+                continue
             report.add(
                 "STP003",
                 "error" if stop_id in hastus.used_stop_ids else "warning",
@@ -469,23 +478,23 @@ def _audit_stops(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report:
                 expected=hastus_stop.get("stop_name", "source stop"),
             )
 
-    known_final_ids = set(cad_by_id) | set(hastus_to_final.values())
-    for stop_id, final_stop in sorted(final_by_id.items()):
-        if stop_id not in known_final_ids:
-            report.add(
-                "STP004",
-                "error",
-                "Stop reconciliation",
-                "Merged stop has no source record",
-                "The final stop is not traceable to CleverCAD or HASTUS.",
-                file="Final:stops.txt",
-                key=stop_id,
-                observed=final_stop.get("stop_name", ""),
-            )
+        known_final_ids = set(cad_by_id) | set(hastus_to_final.values())
+        for stop_id, final_stop in sorted(final_by_id.items()):
+            if stop_id not in known_final_ids:
+                report.add(
+                    "STP004",
+                    "error",
+                    "Stop reconciliation",
+                    "Merged stop has no source record",
+                    "The final stop is not traceable to CleverCAD or HASTUS.",
+                    file="Final:stops.txt",
+                    key=stop_id,
+                    observed=final_stop.get("stop_name", ""),
+                )
 
     for hastus_id, final_id in sorted(hastus_to_final.items()):
         hastus_stop = hastus_by_id[hastus_id]
-        final_stop = final_by_id[final_id]
+        final_stop = final_by_id.get(final_id)
         cad_matches = cad_by_code.get(hastus_id, [])
         cad_stop = cad_matches[0] if len(cad_matches) == 1 else cad_by_id.get(final_id)
         sources = [row for row in (cad_stop, hastus_stop) if row]
@@ -517,6 +526,9 @@ def _audit_stops(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report:
                     observed=f"{distance:.1f} m",
                     expected="≤ 35 m or an approved exception",
                 )
+
+        if final_stop is None:
+            continue
 
         final_name = _normalize_name(final_stop.get("stop_name", ""))
         source_names = {_normalize_name(row.get("stop_name", "")) for row in sources}
@@ -566,10 +578,11 @@ def _audit_stops(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report:
     report.stats["stop_crosswalk"] = {
         "clevercad_stops": len(cad_by_id),
         "hastus_stops": len(hastus_by_id),
-        "final_stops": len(final_by_id),
-        "hastus_stops_resolved_to_final": len(hastus_to_final),
+        "source_stop_mappings": len(hastus_to_final),
         "ambiguous_operational_codes": len(ambiguous_codes),
     }
+    if final:
+        report.stats["stop_crosswalk"]["final_stops"] = len(final_by_id)
 
 
 def _audit_entity_provenance(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report: ValidationReport) -> None:
@@ -634,33 +647,50 @@ def _audit_entity_provenance(cad: SourceFeed, hastus: SourceFeed, final: SourceF
     }
 
 
-def validate_merge(
+def validate_exports(
     clevercad_path: str | Path,
     hastus_path: str | Path,
-    final_path: str | Path,
+    final_path: str | Path | None = None,
 ) -> ValidationReport:
-    report = validate_feed(final_path)
-    report.profile = "oc-transpo-merge-audit"
+    final_value = str(final_path).strip() if final_path is not None else ""
+    if final_value:
+        report = validate_feed(final_value)
+        report.profile = "oc-transpo-source-and-final-audit"
+    else:
+        report = ValidationReport(
+            source_path=f"CleverCAD: {clevercad_path} | HASTUS: {hastus_path}",
+            profile="oc-transpo-source-preflight",
+        )
     cad = _load_source(clevercad_path, "CleverCAD", report)
     hastus = _load_source(hastus_path, "HASTUS", report)
-    final = _load_source(final_path, "Final merged GTFS", report)
+    final = _load_source(final_value, "Final merged GTFS", report) if final_value else None
     loaded = [feed for feed in (cad, hastus, final) if feed]
     try:
         report.stats["inputs"] = {
             feed.label: {"path": str(feed.path), "sha256": feed.sha256}
             for feed in loaded
         }
-        if cad and hastus and final:
+        if cad and hastus:
             hastus_translation = _hastus_stop_translation(cad, hastus, final)
             cad_summaries = _trip_summaries(cad, {}, report)
             hastus_summaries = _trip_summaries(hastus, hastus_translation, report)
-            final_summaries = _trip_summaries(final, {}, report)
+            final_summaries = _trip_summaries(final, {}, report) if final else None
             _audit_stops(cad, hastus, final, report)
-            _audit_entity_provenance(cad, hastus, final, report)
-            if cad_summaries and hastus_summaries and final_summaries:
+            if final:
+                _audit_entity_provenance(cad, hastus, final, report)
+            if cad_summaries and hastus_summaries and (final_summaries or final is None):
                 _audit_trip_patterns(cad_summaries, hastus_summaries, final_summaries, report)
     finally:
         for feed in loaded:
             feed.close()
     report.finish()
     return report
+
+
+def validate_merge(
+    clevercad_path: str | Path,
+    hastus_path: str | Path,
+    final_path: str | Path | None = None,
+) -> ValidationReport:
+    """Backward-compatible alias for the optional-final export audit."""
+    return validate_exports(clevercad_path, hastus_path, final_path)

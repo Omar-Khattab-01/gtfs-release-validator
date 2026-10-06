@@ -1,10 +1,11 @@
 # OC Transpo GTFS Merge Auditor
 
-This local Windows application reconciles the two source exports used by the agency and validates the final merged GTFS:
+This local Windows application first reconciles the two source exports before they are submitted to the vendor:
 
 1. CleverCAD export (`CW-…zip`)
 2. HASTUS export (`GTFS_…zip`)
-3. Final merged/publication GTFS (`…zip`)
+
+After the vendor produces the merged feed, a final merged/publication GTFS can be supplied as an optional third input for post-merge verification.
 
 All three archives are read-only and remain on the workstation.
 
@@ -24,7 +25,13 @@ No third-party Python packages or internet connection are required.
 
 ## Command line
 
-Full three-feed audit:
+Required pre-vendor source audit:
+
+```powershell
+py -3 -m gtfs_validator audit "C:\GTFS\CW-EXPORT.zip" "C:\GTFS\HASTUS-EXPORT.zip" --output source-report.json
+```
+
+Optional source plus final-feed audit:
 
 ```powershell
 py -3 -m gtfs_validator audit "C:\GTFS\CW-EXPORT.zip" "C:\GTFS\HASTUS-EXPORT.zip" "C:\GTFS\FINAL-MERGED.zip" --output merge-report.json
@@ -40,7 +47,7 @@ Exit codes are `0` for eligible, `1` for needs review, and `2` for blocked.
 
 ## Reconciliation model
 
-The tool does not contain route- or incident-specific production rules. Previous incidents are represented as test cases for general rules.
+The tool does not contain route- or incident-specific production rules. Previous incidents are represented as test cases for general rules. CleverCAD and HASTUS are the only required inputs.
 
 For stops, it builds a crosswalk from the source identifiers:
 
@@ -52,13 +59,19 @@ The audit currently detects:
 
 - ambiguous CleverCAD-to-HASTUS stop mappings;
 - source stops missing from the final feed;
-- final stops with no traceable source;
 - source name or coordinate disagreement;
+- equivalent CleverCAD/HASTUS journeys with different ordered stop patterns;
+- ambiguous cross-source identifier mappings.
+
+When the optional final feed is supplied, it additionally detects:
+
+- source stops missing from the final feed and final stops with no source;
 - final stop names/coordinates matching neither source;
 - lost HASTUS station, platform, location-type, or stop-code metadata;
 - final routes, trips, shapes, or services with no source record;
+- changed final stop patterns, times, or pickup/drop-off rules;
 - HASTUS trip identifiers whose service suffix is removed by the merge;
-- all final-feed ZIP, structure, relationship, coordinate, and stop-time checks.
+- all final-feed ZIP, structure, relationship, coordinate, and stop-time issues.
 
 ## Final artifact checks
 
