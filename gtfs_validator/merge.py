@@ -365,18 +365,91 @@ def _variation_similarity(first: dict[str, object], second: dict[str, object]) -
     return sequence_ratio, 0.82 * sequence_ratio + 0.08 * endpoints + 0.06 * headsign_ratio + 0.04 * count_ratio
 
 
+def _direction_alignment_quality(
+    cad_variations: list[dict[str, object]],
+    hastus_variations: list[dict[str, object]],
+    *,
+    reversed_ids: bool,
+) -> tuple[int, int, float]:
+    """Score a route-wide 0/1 direction convention using stop-pattern evidence."""
+    candidates: list[tuple[float, str, str]] = []
+    for cad_item in cad_variations:
+        cad_directions = set(str(value) for value in cad_item.get("direction_ids", []))
+        for hastus_item in hastus_variations:
+            hastus_directions = set(str(value) for value in hastus_item.get("direction_ids", []))
+            if not cad_directions or not hastus_directions:
+                compatible = True
+            elif reversed_ids:
+                compatible = any(
+                    {cad_direction, hastus_direction} == {"0", "1"}
+                    for cad_direction in cad_directions
+                    for hastus_direction in hastus_directions
+                )
+            else:
+                compatible = not cad_directions.isdisjoint(hastus_directions)
+            if not compatible:
+                continue
+            sequence_ratio, _score = _variation_similarity(cad_item, hastus_item)
+            candidates.append((sequence_ratio, str(cad_item["variation_id"]), str(hastus_item["variation_id"])))
+
+    paired_cad: set[str] = set()
+    paired_hastus: set[str] = set()
+    ratios: list[float] = []
+    for ratio, cad_id, hastus_id in sorted(candidates, reverse=True):
+        if cad_id in paired_cad or hastus_id in paired_hastus:
+            continue
+        paired_cad.add(cad_id)
+        paired_hastus.add(hastus_id)
+        ratios.append(ratio)
+    return (
+        sum(ratio >= 0.70 for ratio in ratios),
+        sum(ratio == 1.0 for ratio in ratios),
+        round(sum(ratios), 6),
+    )
+
+
+def _infer_direction_alignment(
+    cad_variations: list[dict[str, object]],
+    hastus_variations: list[dict[str, object]],
+) -> str:
+    directions = {
+        str(value)
+        for item in cad_variations + hastus_variations
+        for value in item.get("direction_ids", [])
+        if str(value)
+    }
+    if not directions or not directions.issubset({"0", "1"}):
+        return "same"
+    same_quality = _direction_alignment_quality(cad_variations, hastus_variations, reversed_ids=False)
+    reversed_quality = _direction_alignment_quality(cad_variations, hastus_variations, reversed_ids=True)
+    return "reversed" if reversed_quality > same_quality else "same"
+
+
+def _directions_compatible(cad_item: dict[str, object], hastus_item: dict[str, object], alignment: str) -> bool:
+    cad_directions = set(str(value) for value in cad_item.get("direction_ids", []))
+    hastus_directions = set(str(value) for value in hastus_item.get("direction_ids", []))
+    if not cad_directions or not hastus_directions:
+        return True
+    if alignment == "reversed":
+        return any(
+            {cad_direction, hastus_direction} == {"0", "1"}
+            for cad_direction in cad_directions
+            for hastus_direction in hastus_directions
+        )
+    return not cad_directions.isdisjoint(hastus_directions)
+
+
 def _pair_route_variations(
     cad_variations: list[dict[str, object]],
     hastus_variations: list[dict[str, object]],
     journey_links: dict[tuple[str, str], int],
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], str]:
     """Pair patterns independently from exact trip times and headsign text."""
+    direction_alignment = _infer_direction_alignment(cad_variations, hastus_variations)
     candidates: list[tuple[float, float, int, dict[str, object], dict[str, object], str]] = []
     for cad_item in cad_variations:
-        cad_directions = set(cad_item.get("direction_ids", []))
         for hastus_item in hastus_variations:
-            hastus_directions = set(hastus_item.get("direction_ids", []))
-            if cad_directions and hastus_directions and cad_directions.isdisjoint(hastus_directions):
+            if not _directions_compatible(cad_item, hastus_item, direction_alignment):
                 continue
             sequence_ratio, score = _variation_similarity(cad_item, hastus_item)
             linked_journeys = journey_links.get((str(cad_item["variation_id"]), str(hastus_item["variation_id"])), 0)
@@ -384,6 +457,8 @@ def _pair_route_variations(
             if not exact and not linked_journeys and sequence_ratio < 0.70:
                 continue
             evidence = "exact stop sequence" if exact else ("matching scheduled journey" if linked_journeys else "similar stop sequence")
+            if direction_alignment == "reversed":
+                evidence += "; source direction IDs are reversed"
             priority = 3.0 if exact else (2.0 + min(linked_journeys, 50) / 1000 if linked_journeys else score)
             candidates.append((priority, score, linked_journeys, cad_item, hastus_item, evidence))
 
@@ -432,7 +507,7 @@ def _pair_route_variations(
         if variation_id not in paired_hastus:
             pairs.append({"pair_id": f"|{variation_id}", "status": "not_comparable", "clevercad_variation_id": "", "hastus_variation_id": variation_id, "similarity_percent": None, "difference_count": None, "linked_journeys": 0, "reason": "no sufficiently similar CleverCAD pattern in the same direction"})
     order = {"issues": 0, "ambiguous": 1, "matching": 2, "not_comparable": 3}
-    return sorted(pairs, key=lambda item: (order[str(item["status"])], str(item["pair_id"])))
+    return sorted(pairs, key=lambda item: (order[str(item["status"])], str(item["pair_id"]))), direction_alignment
 
 
 def _audit_trip_patterns(
@@ -617,7 +692,7 @@ def _audit_trip_patterns(
         matches = compared - mismatches
         cad_variations = cad_catalog.get(route_name, [])
         hastus_variations = hastus_catalog.get(route_name, [])
-        variation_pairs = _pair_route_variations(cad_variations, hastus_variations, journey_pair_counts.get(route_name, {}))
+        variation_pairs, direction_alignment = _pair_route_variations(cad_variations, hastus_variations, journey_pair_counts.get(route_name, {}))
         cad_by_variation = {str(item["variation_id"]): item for item in cad_variations}
         hastus_by_variation = {str(item["variation_id"]): item for item in hastus_variations}
         paired = [item for item in variation_pairs if item["status"] != "not_comparable"]
@@ -685,6 +760,7 @@ def _audit_trip_patterns(
                 "mismatch_variation_count": len(affected_pairs),
                 "ambiguous_variation_count": len(ambiguous_pairs),
                 "unpaired_variation_count": len(unpaired_pairs),
+                "direction_alignment": direction_alignment,
                 "variation_scope": variation_scope,
                 "variation_pairs": variation_pairs,
                 "clevercad_variations": public_cad_variations,

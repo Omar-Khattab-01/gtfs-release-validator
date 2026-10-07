@@ -87,7 +87,8 @@ When the optional final feed is supplied, it additionally detects:
 - route-variation inventory based on translated ordered stop patterns, with trip counts and source shape IDs
 - all-versus-specific variation impact classification and one-click variation filtering
 - compact variation tabs for mismatched, matching, and source-only patterns, with on-demand stop-by-stop comparison
-- direction-aware variation pairing based on translated stop-sequence similarity, so an added terminal stop or different headsign does not prevent comparison
+- route-level direction alignment inferred from translated stop patterns, including feeds that use opposite `direction_id` conventions
+- variation pairing based on translated stop-sequence similarity, so an added terminal stop or different headsign does not prevent comparison
 - an explicit ambiguous-pairing state when more than one counterpart is similarly plausible
 - route sorting by route number, attention priority, or variation count
 - a dedicated stop-mapping tab for names, coordinates, accessibility, platform, station, zone, and descriptive attribute differences

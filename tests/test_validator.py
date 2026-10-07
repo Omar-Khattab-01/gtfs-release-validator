@@ -208,6 +208,27 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual(1, route["variation_pairs"][0]["difference_count"])
             self.assertTrue(any(item.rule_id == "TRP103" for item in report.findings))
 
+    def test_route_direction_convention_is_inferred_from_stop_patterns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad_path = Path(temp_dir) / "cad.zip"
+            hastus_path = Path(temp_dir) / "hastus.zip"
+            routes = "route_id,agency_id,route_short_name,route_long_name,route_type\nr561,OCT,561,Interprovincial,3\n"
+            cad_trips = "route_id,service_id,trip_id,trip_headsign,direction_id,shape_id\nr561,WKD,c1,Tunney's Pasture,0,\nr561,WKD,c2,Terry Fox,1,\n"
+            hastus_trips = "route_id,service_id,trip_id,trip_headsign,direction_id,shape_id\nr561,WKD,h1,Tunney's Pasture,1,\nr561,WKD,h2,Terry Fox,0,\n"
+            cad_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\n1,HA,A,45.1,-75.1\n2,HB,B,45.2,-75.2\n3,HC,C,45.3,-75.3\n4,HD,D,45.4,-75.4\n"
+            hastus_stops = "stop_id,stop_code,stop_name,stop_lat,stop_lon\nHA,1,A,45.1,-75.1\nHB,2,B,45.2,-75.2\nHC,3,C,45.3,-75.3\nHD,4,D,45.4,-75.4\n"
+            cad_times = "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nc1,06:00:00,06:00:00,1,1\nc1,06:10:00,06:10:00,2,2\nc2,07:00:00,07:00:00,3,1\nc2,07:10:00,07:10:00,4,2\n"
+            hastus_times = "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nh1,06:00:00,06:00:00,HA,1\nh1,06:10:00,06:10:00,HB,2\nh2,07:00:00,07:00:00,HC,1\nh2,07:10:00,07:10:00,HD,2\n"
+            write_feed(cad_path, extra={"routes.txt": routes, "trips.txt": cad_trips, "stops.txt": cad_stops, "stop_times.txt": cad_times})
+            write_feed(hastus_path, extra={"routes.txt": routes, "trips.txt": hastus_trips, "stops.txt": hastus_stops, "stop_times.txt": hastus_times})
+            report = validate_exports(cad_path, hastus_path)
+            route = next(item for item in report.stats["trip_reconciliation"]["route_health"] if item["route_short_name"] == "561")
+            self.assertEqual("reversed", route["direction_alignment"])
+            self.assertEqual("healthy", route["status"])
+            self.assertEqual(2, route["paired_variation_count"])
+            self.assertEqual({"matching"}, {item["status"] for item in route["variation_pairs"]})
+            self.assertTrue(all("direction IDs are reversed" in item["reason"] for item in route["variation_pairs"]))
+
     def test_stop_mapping_catalog_includes_attribute_differences(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cad_path = Path(temp_dir) / "cad.zip"

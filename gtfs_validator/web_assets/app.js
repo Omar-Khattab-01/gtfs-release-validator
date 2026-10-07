@@ -133,10 +133,11 @@ function renderRouteHealth(routes) {
     if (route.unpaired_variation_count) {
       issueParts.push(`${route.unpaired_variation_count} source-only pattern${route.unpaired_variation_count === 1 ? '' : 's'}`);
     }
-    const detail = route.status === 'issues'
+    let detail = route.status === 'issues'
       ? issueParts.join(' · ')
       : route.status === 'ambiguous' ? `${route.ambiguous_variation_count || 0} pairing${route.ambiguous_variation_count === 1 ? '' : 's'} need review`
       : route.status === 'healthy' ? `${variationCounts} · all matching` : `${variationCounts} · no counterpart`;
+    if (route.direction_alignment === 'reversed' && route.status !== 'not_comparable') detail += ' · directions reversed';
     return `<button type="button" class="route-card ${escapeHtml(route.status)} ${activeRoute === route.route_short_name ? 'active' : ''}" data-route="${escapeHtml(route.route_short_name)}"><strong>${escapeHtml(route.route_short_name || 'Unnamed')}</strong><span>${escapeHtml(detail)}</span></button>`;
   }).join('');
   routeGrid.querySelectorAll('.route-card').forEach(card => card.addEventListener('click', () => {
@@ -185,7 +186,8 @@ function renderVariationPanel(route) {
     none: route.status === 'not_comparable' ? 'No sufficiently similar pattern exists in the other source.' : 'All confidently paired route variations match.'
   };
   document.querySelector('#variation-title').textContent = `Route ${route.route_short_name} · ${route.clevercad_variation_count} CleverCAD and ${route.hastus_variation_count} HASTUS variations`;
-  document.querySelector('#variation-scope').textContent = scopeLabels[route.variation_scope] || '';
+  const directionNotice = route.direction_alignment === 'reversed' ? ' CleverCAD and HASTUS use reversed direction IDs for this route.' : '';
+  document.querySelector('#variation-scope').textContent = (scopeLabels[route.variation_scope] || '') + directionNotice;
   const pairs = buildVariationPairs(route);
   const groups = [
     ['issues', 'Needs attention'],
