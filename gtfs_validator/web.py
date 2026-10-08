@@ -17,6 +17,8 @@ from urllib.parse import parse_qs, urlparse
 
 from .details import build_detail
 from .merge import validate_merge
+from .engine import validate_feed
+from . import viewer
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -34,7 +36,8 @@ class Job:
     error: str | None = None
     report: dict[str, Any] | None = None
     details_cache: dict[int, dict[str, Any]] = field(default_factory=dict)
-    variation_cache: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
+    variation_cache: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict)
+    viewer_cache: dict[tuple, dict[str, Any]] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def public(self) -> dict[str, Any]:
@@ -60,7 +63,9 @@ def _run_job(job: Job) -> None:
     with job.lock:
         job.status = "running"
     try:
-        report = validate_merge(job.clevercad_path, job.hastus_path, job.final_path)
+        report = validate_merge(job.clevercad_path, job.hastus_path, job.final_path) if job.clevercad_path and job.hastus_path else validate_feed(job.final_path)
+        if not job.clevercad_path and not job.hastus_path:
+            report.stats["inputs"] = {"Final merged GTFS": {"path": job.final_path, "sha256": report.sha256}}
         with job.lock:
             job.report = report.to_dict()
             job.status = "complete"
@@ -76,7 +81,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.7.1"
+    server_version = "GTFSValidator/0.8.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -89,7 +94,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'",
         )
 
     def _bytes(self, status: int, content: bytes, content_type: str) -> None:
@@ -111,6 +116,14 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         path = parsed_url.path
         if path == "/":
             return self._serve_asset("index.html")
+        if path.startswith("/file-viewer/"):
+            relative = path.removeprefix("/file-viewer/") or "index.html"
+            root = (WEB_ROOT / "file_viewer").resolve()
+            asset = (root / relative).resolve()
+            if not asset.is_relative_to(root) or not asset.is_file():
+                return self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+            content_type = mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
+            return self._bytes(HTTPStatus.OK, asset.read_bytes(), content_type)
         if path.startswith("/assets/"):
             name = path.removeprefix("/assets/")
             if "/" in name or "\\" in name or name.startswith("."):
@@ -124,6 +137,31 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown run"})
             if len(parts) == 3:
                 return self._json(HTTPStatus.OK, job.public())
+            if len(parts) == 4 and parts[3] == "viewer":
+                query = parse_qs(parsed_url.query)
+                get = lambda key, default="": str((query.get(key) or [default])[0])
+                source = get("source", "final")
+                feed_path = {"cad": job.clevercad_path, "hastus": job.hastus_path, "final": job.final_path}.get(source)
+                if not feed_path:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "This source was not supplied"})
+                key = (source, get("route_id"), get("trip_id"), get("table"), get("offset", "0"))
+                try:
+                    with job.lock:
+                        data = job.viewer_cache.get(key)
+                    if data is None:
+                        if get("trip_id"):
+                            data = viewer.trip_detail(feed_path, get("trip_id"))
+                        elif get("route_id"):
+                            data = viewer.route_detail(feed_path, get("route_id"))
+                        elif get("table"):
+                            data = viewer.table_page(feed_path, get("table"), max(0, int(get("offset", "0"))))
+                        else:
+                            data = viewer.inventory(feed_path)
+                        with job.lock:
+                            job.viewer_cache[key] = data
+                    return self._json(HTTPStatus.OK, data)
+                except (OSError, KeyError, ValueError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile) as exc:
+                    return self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": f"Could not inspect feed: {exc}"})
             if len(parts) == 4 and parts[3] == "report.json":
                 payload = job.public()
                 if payload.get("report") is None:
@@ -151,8 +189,16 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                     cached = job.details_cache.get(finding_index)
                 if cached is None:
                     try:
+                        finding = dict(findings[finding_index])
+                        context = dict(finding.get("context") or {})
+                        if job.final_path and finding.get("rule_id") in {"TRP102", "TRP103"}:
+                            route = next((item for item in report.get("stats", {}).get("trip_reconciliation", {}).get("route_health", []) if item["route_short_name"] == context.get("route_short_name")), {})
+                            pair = next((item for item in route.get("variation_pairs", []) if item["clevercad_variation_id"] == context.get("clevercad_variation_id") and item["hastus_variation_id"] == context.get("hastus_variation_id")), {})
+                            if pair.get("final_matches"):
+                                context["final_trip_id"] = pair["final_matches"][0]["example_trip_id"]
+                        finding["context"] = context
                         cached = build_detail(
-                            findings[finding_index],
+                            finding,
                             job.clevercad_path,
                             job.hastus_path,
                             job.final_path,
@@ -169,12 +215,13 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed_url.query)
                 cad_trip_id = str((query.get("cad_trip_id") or [""])[0]).strip()
                 hastus_trip_id = str((query.get("hastus_trip_id") or [""])[0]).strip()
-                if not cad_trip_id or not hastus_trip_id:
+                final_trip_id = str((query.get("final_trip_id") or [""])[0]).strip()
+                if not cad_trip_id and not hastus_trip_id:
                     return self._json(
                         HTTPStatus.BAD_REQUEST,
-                        {"error": "Both representative trip IDs are required"},
+                        {"error": "At least one source representative trip ID is required"},
                     )
-                cache_key = (cad_trip_id, hastus_trip_id)
+                cache_key = (cad_trip_id, hastus_trip_id, final_trip_id)
                 with job.lock:
                     cached = job.variation_cache.get(cache_key)
                 if cached is None:
@@ -185,6 +232,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                                 "context": {
                                     "clevercad_trip_id": cad_trip_id,
                                     "hastus_trip_id": hastus_trip_id,
+                                    "final_trip_id": final_trip_id,
                                 },
                             },
                             job.clevercad_path,
@@ -219,8 +267,8 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         clevercad_path = str(payload.get("clevercad_path", "")).strip()
         hastus_path = str(payload.get("hastus_path", "")).strip()
         final_path = str(payload.get("final_path", "")).strip()
-        if not clevercad_path or not hastus_path:
-            return self._json(HTTPStatus.BAD_REQUEST, {"error": "CleverCAD and HASTUS ZIP paths are required"})
+        if bool(clevercad_path) != bool(hastus_path) or (not clevercad_path and not final_path):
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": "Supply both sources, or only a final GTFS ZIP to validate and inspect it"})
 
         job = Job(
             id=uuid.uuid4().hex[:12],

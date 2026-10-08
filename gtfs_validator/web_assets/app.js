@@ -25,6 +25,104 @@ let stopMappingLimit = 80;
 let currentRunId = '';
 let pageLimit = 60;
 const selected = new Set();
+let viewerInventory = {routes: [], files: []};
+let viewerRequest = 0;
+
+async function viewerFetch(params = {}) {
+  const query = new URLSearchParams({source: document.querySelector('#viewer-source').value, ...params});
+  const response = await fetch(`/api/runs/${currentRunId}/viewer?${query}`);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Could not inspect feed');
+  return data;
+}
+
+async function setupViewer(inputs) {
+  const source = document.querySelector('#viewer-source');
+  const names = {final:'Final merged GTFS', cad:'CleverCAD', hastus:'HASTUS'};
+  for (const option of source.options) option.disabled = !inputs[names[option.value]];
+  source.value = [...source.options].find(option => !option.disabled)?.value || 'final';
+  await loadViewer();
+}
+
+async function loadViewer() {
+  const request = ++viewerRequest;
+  document.querySelector('#viewer-content').textContent = 'Loading feed inventory…';
+  try {
+    const data = await viewerFetch();
+    if (request !== viewerRequest) return;
+    viewerInventory = data;
+    document.querySelector('#viewer-table').innerHTML = '<option value="">Select a table</option>' + data.files.filter(file => file.name.endsWith('.txt')).map(file => `<option>${escapeHtml(file.name)}</option>`).join('');
+    renderViewerRoutes();
+    document.querySelector('#viewer-content').innerHTML = `<p>${data.routes.length} routes · ${data.files.length} files. Select a route to inspect variations and trips, or select a raw table.</p><p><a href="/file-viewer/" target="_blank" rel="noopener">Open advanced GTFS file viewer and issue highlights</a> — load a ZIP directly from your device.</p>`;
+  } catch (error) { document.querySelector('#viewer-content').textContent = error.message; }
+}
+
+function renderViewerRoutes() {
+  const needle = document.querySelector('#viewer-search').value.toLowerCase();
+  const grid = document.querySelector('#viewer-routes');
+  grid.innerHTML = viewerInventory.routes.filter(route => `${route.route_short_name} ${route.route_long_name}`.toLowerCase().includes(needle)).map(route => `<button class="route-card" data-id="${escapeHtml(route.route_id)}"><strong>${escapeHtml(route.route_short_name || route.route_id)}</strong><span>${escapeHtml(route.route_long_name)} · ${route.trip_count} trips</span></button>`).join('');
+  grid.querySelectorAll('button').forEach(button => button.addEventListener('click', () => openViewerRoute(button.dataset.id)));
+}
+
+async function openViewerRoute(routeId) {
+  const content = document.querySelector('#viewer-content');
+  const request = ++viewerRequest;
+  content.textContent = 'Loading route variations and trips…';
+  try {
+    const data = await viewerFetch({route_id: routeId});
+    if (request !== viewerRequest) return;
+    const route = viewerInventory.routes.find(item => item.route_id === routeId);
+    content.innerHTML = `<h4>Route ${escapeHtml(route?.route_short_name || routeId)} · ${data.variations.length} variations</h4><div id="viewer-variation-tabs" class="variation-tabs">${data.variations.map((variation, index) => `<button data-index="${index}" class="variation-tab">${variation.variation_id} · direction ${escapeHtml(variation.direction_id)} · ${variation.stop_count} stops · ${variation.trip_count} trips</button>`).join('')}</div><div id="viewer-trips"></div><div id="viewer-trip-detail"></div>`;
+    const show = index => {
+      const variation = data.variations[index];
+      document.querySelector('#viewer-trips').innerHTML = `<p>Shapes: ${escapeHtml(variation.shape_ids.join(', ') || 'None')}</p><label>Trip<select id="viewer-trip-choice">${variation.trips.map(trip => `<option value="${escapeHtml(trip.trip_id)}">${escapeHtml(trip.first_time)}–${escapeHtml(trip.last_time)} · ${escapeHtml(trip.trip_headsign)} · ${escapeHtml(trip.service_id)} · ${escapeHtml(trip.trip_id)}</option>`).join('')}</select></label>`;
+      document.querySelector('#viewer-trip-choice').addEventListener('change', event => openViewerTrip(event.target.value));
+      openViewerTrip(variation.trips[0].trip_id);
+    };
+    document.querySelectorAll('#viewer-variation-tabs button').forEach(button => button.addEventListener('click', () => show(Number(button.dataset.index))));
+    if (data.variations.length) show(0);
+  } catch (error) { content.textContent = error.message; }
+}
+
+function renderShapeMap(data) {
+  const points = data.shape.map(row => [Number(row.shape_pt_lon), Number(row.shape_pt_lat)]).filter(point => point.every(Number.isFinite));
+  const stops = data.stops.filter(stop => stop.source_record.stop_lat && stop.source_record.stop_lon).map(stop => ({...stop, lon:Number(stop.source_record.stop_lon), lat:Number(stop.source_record.stop_lat)})).filter(stop => Number.isFinite(stop.lon) && Number.isFinite(stop.lat));
+  const all = [...points, ...stops.map(stop => [stop.lon, stop.lat])];
+  if (!all.length) return '<p>No valid shape or stop coordinates available.</p>';
+  const minX = Math.min(...all.map(point => point[0])), minY = Math.min(...all.map(point => point[1]));
+  const dx = Math.max(.0001, Math.max(...all.map(point => point[0])) - minX), dy = Math.max(.0001, Math.max(...all.map(point => point[1])) - minY);
+  const scale = Math.min(640/(dx*Math.cos(minY*Math.PI/180)), 300/dy);
+  const x = lon => 30+(lon-minX)*Math.cos(minY*Math.PI/180)*scale;
+  const y = lat => 330-(lat-minY)*scale;
+  return `<section class="map-card"><h4>Shape and stops · North ↑</h4><svg viewBox="0 0 700 360" class="mini-map" role="img" aria-label="Local route shape and stops"><polyline points="${points.map(point => `${x(point[0])},${y(point[1])}`).join(' ')}" fill="none" stroke="#c5202f" stroke-width="3"/>${stops.map(stop => `<circle cx="${x(stop.lon)}" cy="${y(stop.lat)}" r="4" fill="#183446"><title>${escapeHtml(stop.sequence)} · ${escapeHtml(stop.stop_name)}</title></circle>`).join('')}</svg><p>Red: exported shape · Blue: stops. Hover a stop for its name and sequence.</p></section>`;
+}
+
+async function openViewerTrip(tripId) {
+  const target = document.querySelector('#viewer-trip-detail');
+  if (!target) return;
+  target.textContent = 'Loading trip stops and shape…';
+  try {
+    const data = await viewerFetch({trip_id: tripId});
+    if (document.querySelector('#viewer-trip-choice')?.value !== tripId) return;
+    target.innerHTML = renderShapeMap(data) + sourceCard('Trip attributes', data.trip) + `<div class="comparison-table"><table><thead><tr><th>Sequence</th><th>Stop</th><th>Arrival</th><th>Departure</th><th>Pickup / drop-off</th></tr></thead><tbody>${data.stops.map(stop => `<tr><td>${escapeHtml(stop.sequence)}</td><td><details><summary>${escapeHtml(stop.stop_name)} · ${escapeHtml(stop.source_stop_id)}</summary>${sourceCard('Stop attributes', stop.source_record)}</details></td><td>${escapeHtml(stop.arrival_time)}</td><td>${escapeHtml(stop.departure_time)}</td><td>${escapeHtml(stop.pickup_type)} / ${escapeHtml(stop.drop_off_type)}</td></tr>`).join('')}</tbody></table></div>`;
+  } catch (error) { target.textContent = error.message; }
+}
+
+async function openViewerTable(offset = 0) {
+  const target = document.querySelector('#viewer-content');
+  const name = document.querySelector('#viewer-table').value;
+  if (!name) return;
+  try {
+    const data = await viewerFetch({table:name, offset});
+    target.innerHTML = `<h4>${escapeHtml(name)} · rows ${offset+1}–${offset+data.rows.length}</h4><div class="comparison-table"><table><thead><tr>${data.columns.map(column => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${data.rows.map(row => `<tr>${data.columns.map(column => `<td>${escapeHtml(row[column])}</td>`).join('')}</tr>`).join('')}</tbody></table></div><button id="table-prev" ${offset === 0 ? 'disabled' : ''}>Previous 100</button><button id="table-next" ${data.has_more ? '' : 'disabled'}>Next 100</button>`;
+    document.querySelector('#table-prev').addEventListener('click', () => openViewerTable(Math.max(0, offset-100)));
+    document.querySelector('#table-next').addEventListener('click', () => openViewerTable(offset+100));
+  } catch (error) { target.textContent = error.message; }
+}
+
+document.querySelector('#viewer-source').addEventListener('change', loadViewer);
+document.querySelector('#viewer-search').addEventListener('input', renderViewerRoutes);
+document.querySelector('#viewer-table').addEventListener('change', () => openViewerTable());
 
 const ruleGuidance = {
   STP005: 'Review rider-facing names side by side. Open an item to inspect every source field.',
@@ -106,6 +204,7 @@ function renderReport(report, id) {
   renderFindings();
   renderInventory(report);
   renderPackaging(report);
+  setupViewer(report.stats?.inputs || {});
   results.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
@@ -217,25 +316,25 @@ async function selectVariation(route, pair) {
   renderFindings();
   const detailPanel = document.querySelector('#variation-detail');
   detailPanel.innerHTML = `<div class="variation-source-grid">${variationSummary(pair.cad, 'CleverCAD')}${variationSummary(pair.hastus, 'HASTUS')}</div>`;
-  if (!pair.cad || !pair.hastus) {
-    detailPanel.innerHTML += `<p class="variation-prompt">${escapeHtml(pair.reason || 'This source-only variation has no paired pattern to display side by side.')}</p>`;
-    return;
-  }
   detailPanel.innerHTML += '<div class="loading-detail"><div class="spinner"></div><p>Loading representative stop patterns…</p></div>';
   try {
-    const query = new URLSearchParams({cad_trip_id: pair.cad.example_trip_id, hastus_trip_id: pair.hastus.example_trip_id});
+    const finalMatches = [...(pair.final_matches || []), ...(route.final_variations || []).filter(item => !(pair.final_matches || []).some(match => match.variation_id === item.variation_id)).map(item => ({...item, matches_source:'Neither (manual review)'}))];
+    const finalItem = pair.selectedFinal || (pair.final_matches || [])[0];
+    const query = new URLSearchParams({cad_trip_id: pair.cad?.example_trip_id || '', hastus_trip_id: pair.hastus?.example_trip_id || '', final_trip_id: finalItem?.example_trip_id || ''});
     const response = await fetch(`/api/runs/${currentRunId}/variation-detail?${query}`, {cache:'no-store'});
     const detail = await response.json();
     if (!response.ok) throw new Error(detail.error || 'Variation evidence could not be loaded');
     if (activeVariation !== pair.id) return;
-    detail.clevercad_variation_id = pair.cad.variation_id;
-    detail.hastus_variation_id = pair.hastus.variation_id;
-    detail.clevercad_shape_id = (pair.cad.shape_ids || []).join(', ');
-    detail.hastus_shape_id = (pair.hastus.shape_ids || []).join(', ');
+    detail.clevercad_variation_id = pair.cad?.variation_id;
+    detail.hastus_variation_id = pair.hastus?.variation_id;
+    detail.clevercad_shape_id = (pair.cad?.shape_ids || []).join(', ');
+    detail.hastus_shape_id = (pair.hastus?.shape_ids || []).join(', ');
     detail.route_short_name = route.route_short_name;
-    const resultLabel = pair.status === 'matching' ? 'Patterns match' : pair.status === 'ambiguous' ? 'Pairing needs review' : 'Pattern mismatch';
+    const resultLabel = pair.status === 'matching' ? 'Patterns match' : pair.status === 'ambiguous' ? 'Pairing needs review' : pair.status === 'not_comparable' ? 'Source-only pattern' : 'Pattern mismatch';
     const reason = pair.reason ? ` · ${pair.reason}` : '';
-    detailPanel.innerHTML = `<div class="variation-source-grid">${variationSummary(pair.cad, 'CleverCAD')}${variationSummary(pair.hastus, 'HASTUS')}</div><div class="variation-result ${pair.status}"><strong>${escapeHtml(resultLabel)}</strong><span>${detail.differences.length ? `${detail.differences.length} stop-sequence differences` : 'The translated ordered stops are identical.'}${escapeHtml(reason)}</span></div>${renderTripDetail(detail)}`;
+    const finalOptions = finalMatches.length ? `<label>Final pattern<select id="final-pattern-choice"><option value="" ${finalItem ? '' : 'selected'}>Choose a final pattern for manual review</option>${finalMatches.map(item => `<option value="${escapeHtml(item.variation_id)}" ${item.variation_id === finalItem?.variation_id ? 'selected' : ''}>${escapeHtml(item.variation_id)} · matches ${escapeHtml(item.matches_source)} · ${item.trip_count} trips</option>`).join('')}</select></label><p>${finalItem ? `Selected final pattern matches: ${escapeHtml(finalItem.matches_source)}` : 'No exact final pattern matches this variation. Choose a pattern above to investigate.'}</p>` : detail.final_supplied ? '<p>No final pattern exists on this route. Use the local feed viewer to inspect the final feed.</p>' : '';
+    detailPanel.innerHTML = `<div class="variation-source-grid">${variationSummary(pair.cad, 'CleverCAD')}${variationSummary(pair.hastus, 'HASTUS')}${detail.final_supplied ? variationSummary(finalItem, 'Final merged GTFS') : ''}</div>${finalOptions}<div class="variation-result ${pair.status}"><strong>${escapeHtml(resultLabel)}</strong><span>${escapeHtml(reason)}</span></div>${renderTripDetail(detail)}`;
+    document.querySelector('#final-pattern-choice')?.addEventListener('change', event => { pair.selectedFinal = finalMatches.find(item => item.variation_id === event.target.value); selectVariation(route, pair); });
   } catch (error) {
     detailPanel.innerHTML += `<p class="variation-error">${escapeHtml(error.message)}</p>`;
   }
@@ -457,7 +556,9 @@ function renderTripDetail(detail) {
     const cad = row.clevercad || {};
     const hastus = row.hastus || {};
     const changedFields = row.fields?.length ? `<br><small>${escapeHtml(row.fields.join(', ').replaceAll('_',' '))}</small>` : '';
-    return `<tr class="${escapeHtml(row.status.replaceAll('_','-'))}"><td>${index + 1}</td><td class="status-cell"><span class="diff-badge ${escapeHtml(row.status.replaceAll('_','-'))}">${escapeHtml(statusLabels[row.status] || row.status)}</span>${changedFields}</td><td>${escapeHtml(cad.sequence || '—')}</td><td>${escapeHtml(cad.departure_time || cad.arrival_time || '—')}</td><td><strong>${escapeHtml(cad.stop_name || '—')}</strong><br><small>source ${escapeHtml(cad.source_stop_id || '—')} · mapped ${escapeHtml(cad.canonical_stop_id || '—')}</small></td><td>${escapeHtml(hastus.sequence || '—')}</td><td>${escapeHtml(hastus.departure_time || hastus.arrival_time || '—')}</td><td><strong>${escapeHtml(hastus.stop_name || '—')}</strong><br><small>source ${escapeHtml(hastus.source_stop_id || '—')} · mapped ${escapeHtml(hastus.canonical_stop_id || '—')}</small></td></tr>`;
+    const final = row.final || {};
+    const finalCell = detail.final_supplied ? `<td><strong>${escapeHtml(final.stop_name || '—')}</strong><br>${escapeHtml(final.departure_time || final.arrival_time || '—')}<br><small>stop ${escapeHtml(final.source_stop_id || '—')} · ${escapeHtml(row.final_source || 'No final counterpart')}</small></td>` : '';
+    return `<tr class="${escapeHtml(row.status.replaceAll('_','-'))}"><td>${index + 1}</td><td class="status-cell"><span class="diff-badge ${escapeHtml(row.status.replaceAll('_','-'))}">${escapeHtml(statusLabels[row.status] || row.status)}</span>${changedFields}</td><td>${escapeHtml(cad.sequence || '—')}</td><td>${escapeHtml(cad.departure_time || cad.arrival_time || '—')}</td><td><strong>${escapeHtml(cad.stop_name || '—')}</strong><br><small>source ${escapeHtml(cad.source_stop_id || '—')} · mapped ${escapeHtml(cad.canonical_stop_id || '—')}</small></td><td>${escapeHtml(hastus.sequence || '—')}</td><td>${escapeHtml(hastus.departure_time || hastus.arrival_time || '—')}</td><td><strong>${escapeHtml(hastus.stop_name || '—')}</strong><br><small>source ${escapeHtml(hastus.source_stop_id || '—')} · mapped ${escapeHtml(hastus.canonical_stop_id || '—')}</small></td>${finalCell}</tr>`;
   }).join('');
   const evidence = differences.map((row, index) => {
     const cad = row.clevercad;
@@ -466,7 +567,7 @@ function renderTripDetail(detail) {
     const hastusName = hastus?.stop_name || 'No HASTUS stop';
     return `<details class="mismatch-evidence"><summary>${index + 1}. ${escapeHtml(statusLabels[row.status] || row.status)} · ${escapeHtml(cadName)} ↔ ${escapeHtml(hastusName)}</summary><div class="source-grid">${sourceCard('CleverCAD complete stop record', cad?.source_record || {}, '')}${sourceCard('HASTUS complete stop record', hastus?.source_record || {}, 'hastus')}</div></details>`;
   }).join('');
-  return `<div class="trip-context">${context.map(value=>`<span>${escapeHtml(value)}</span>`).join('')}</div><div class="comparison-table"><table><thead><tr><th>Aligned row</th><th>Result</th><th>CAD #</th><th>CAD time</th><th>CleverCAD stop</th><th>HASTUS #</th><th>HASTUS time</th><th>HASTUS stop</th></tr></thead><tbody>${rows}</tbody></table></div><div class="mismatch-stack"><h3>Mismatch evidence</h3><p class="quiet">Open any difference to see every available stops.txt field from both exports.</p>${evidence || '<p>No sequence differences were found.</p>'}</div>`;
+  return `<div class="trip-context">${context.map(value=>`<span>${escapeHtml(value)}</span>`).join('')}</div><div class="comparison-table"><table><thead><tr><th>Aligned row</th><th>Result</th><th>CAD #</th><th>CAD time</th><th>CleverCAD stop</th><th>HASTUS #</th><th>HASTUS time</th><th>HASTUS stop</th>${detail.final_supplied ? '<th>Final merged GTFS · source chosen</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div><div class="mismatch-stack"><h3>Mismatch evidence</h3><p class="quiet">Open any difference to see every available stops.txt field from both exports.</p>${evidence || '<p>No sequence differences were found.</p>'}</div>`;
 }
 
 function csvCell(value) {
@@ -520,6 +621,7 @@ document.querySelectorAll('.workspace-tab').forEach(tab => tab.addEventListener(
   document.querySelectorAll('.workspace-tab').forEach(item => { item.classList.toggle('active', item === tab); item.setAttribute('aria-selected', String(item === tab)); });
   document.querySelector('#route-view').classList.toggle('hidden', tab.dataset.view !== 'routes');
   document.querySelector('#stop-view').classList.toggle('hidden', tab.dataset.view !== 'stops');
+  document.querySelector('#viewer-view').classList.toggle('hidden', tab.dataset.view !== 'viewer');
 }));
 stopMappingSearch.addEventListener('input', () => { stopMappingLimit = 80; renderStopMappingRows(); });
 stopMappingFilter.addEventListener('change', () => { stopMappingLimit = 80; renderStopMappingRows(); });

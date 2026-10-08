@@ -9,6 +9,28 @@ After the vendor produces the merged feed, a final merged/publication GTFS can b
 
 All three archives are read-only and remain on the workstation.
 
+The interface also accepts **only a final ZIP**: leave both source paths empty
+and select **Validate & inspect**. The existing Python validator checks the file
+and the Local feed viewer lets you browse routes, variations, individual trips,
+stops, shapes, and paginated GTFS tables. Shapes use an offline coordinate plot.
+
+When all three feeds are supplied, open a route variation to see a final column
+alongside CleverCAD and HASTUS. The final pattern selector lists exact source
+pattern matches first, with other final patterns available for manual review.
+Multiple final patterns can preserve different source variations; the interface
+does not claim the vendor chose one source for the entire route. Source labels
+mean stop-pattern equivalence, not proof of vendor intent or schedule equality.
+
+Source-only variations open their own stop sequence. The Local feed viewer can
+inspect all their trips and shapes, even when no counterpart exists.
+
+Your [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) is bundled at
+`http://127.0.0.1:8765/file-viewer/`, accessible from the Local feed viewer.
+It supports opening ZIPs directly, coloured columns, virtual scrolling, feed
+checks, and issue highlights. Its files are read directly in the browser and
+never uploaded. No Node installation is needed to run the bundled viewer.
+Build attribution is recorded in THIRD_PARTY.md.
+
 ## Windows setup and launch
 
 Requirements: Windows 10/11 and Python 3.10 or newer from <https://www.python.org/downloads/windows/>. During Python installation, enable **Add Python to PATH** and install the Python launcher.
@@ -107,6 +129,7 @@ The next comparison layers are calendar expansion on actual operating dates, dup
 
 - The server binds to `127.0.0.1` only.
 - It makes no outbound requests and uses no telemetry or CDN assets.
-- Browser inputs are local paths; archives are not uploaded into browser memory.
+- Audit inputs are local paths. The advanced viewer opens a user-selected ZIP
+  directly in browser memory; neither mode sends feed data off the workstation.
 - ZIP paths are screened before any system extraction test.
 - The application has no third-party Python dependencies.

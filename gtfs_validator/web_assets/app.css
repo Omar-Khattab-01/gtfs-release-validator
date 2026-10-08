@@ -107,7 +107,7 @@ button:hover { background: var(--red-dark); }
 .variation-tab span { color: var(--muted); font-size: 10px; }
 .variation-detail { margin-top: 12px; padding: 14px; border: 1px solid var(--line); background: white; }
 .variation-prompt { margin: 4px; color: var(--muted); text-align: center; font-size: 12px; }
-.variation-source-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.variation-source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .variation-source { display: grid; gap: 4px; padding: 12px; border-left: 4px solid var(--navy); background: #f1f4f5; }
 .variation-source + .variation-source { border-left-color: var(--red); background: #fff4f2; }
 .variation-source h5 { margin: 0; font-size: 12px; }

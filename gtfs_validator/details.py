@@ -33,18 +33,12 @@ def _trip_stop_times(
     translation: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    started = False
     with zipfile.ZipFile(Path(path)) as archive, archive.open("stop_times.txt") as raw:
         text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
         for row in csv.DictReader(text):
             current_trip = (row.get("trip_id") or "").strip()
             if current_trip != trip_id:
-                # Both supported agency exports group stop_times by trip. Once the
-                # requested block ends, avoid scanning hundreds of MB needlessly.
-                if started:
-                    break
                 continue
-            started = True
             source_stop_id = (row.get("stop_id") or "").strip()
             stop = stop_names.get(source_stop_id, {})
             result.append(
@@ -142,8 +136,8 @@ def build_detail(
 ) -> dict[str, Any]:
     context = finding.get("context") or {}
     rule_id = finding.get("rule_id", "")
-    cad_stops = _stop_index(clevercad_path)
-    hastus_stops = _stop_index(hastus_path)
+    cad_stops = _stop_index(clevercad_path) if clevercad_path else {}
+    hastus_stops = _stop_index(hastus_path) if hastus_path else {}
     translation = _translation(cad_stops, hastus_stops)
 
     if rule_id.startswith("STP"):
@@ -168,8 +162,8 @@ def build_detail(
         cad_trip_id = context.get("clevercad_trip_id")
         hastus_trip_id = context.get("hastus_trip_id")
         source_ids = context.get("source_trip_ids") or []
-        cad_ids = _trip_ids(clevercad_path)
-        hastus_ids = _trip_ids(hastus_path)
+        cad_ids = _trip_ids(clevercad_path) if clevercad_path else set()
+        hastus_ids = _trip_ids(hastus_path) if hastus_path else set()
         if not cad_trip_id:
             cad_trip_id = next((trip_id for trip_id in source_ids if trip_id in cad_ids), None)
         if not hastus_trip_id:
@@ -191,7 +185,7 @@ def build_detail(
                     "stops": _trip_stop_times(hastus_path, hastus_trip_id, hastus_stops, translation),
                 }
             )
-        final_trip_id = str(finding.get("key", "")) if final_path and rule_id in {"TRP100", "TRP101"} else ""
+        final_trip_id = context.get("final_trip_id", "") or (str(finding.get("key", "")) if final_path and rule_id in {"TRP100", "TRP101"} else "")
         if final_trip_id:
             final_stops = _stop_index(final_path)
             sides.append(
@@ -201,12 +195,33 @@ def build_detail(
                     "stops": _trip_stop_times(final_path, final_trip_id, final_stops),
                 }
             )
-        alignment = _align_sequences(sides[:2], compare_schedule=rule_id == "TRP101")
+        source_sides = [side for side in sides if side["label"] != "Final merged GTFS"]
+        alignment = _align_sequences(source_sides, compare_schedule=rule_id == "TRP101")
+        if len(source_sides) == 1:
+            source_key = "clevercad" if source_sides[0]["label"] == "CleverCAD" else "hastus"
+            alignment = [{"clevercad": None, "hastus": None, source_key: stop, "status": source_key + "_only", "fields": []} for stop in source_sides[0]["stops"]]
+        final_side = next((side for side in sides if side["label"] == "Final merged GTFS"), None)
+        if final_side:
+            # Align final stops against the union of the two source columns.
+            # Prefer CAD IDs where both sources occupy a substitution row.
+            base = [row.get("clevercad") or row.get("hastus") for row in alignment]
+            matcher = difflib.SequenceMatcher(a=[stop["canonical_stop_id"] for stop in base], b=[stop["canonical_stop_id"] for stop in final_side["stops"]], autojunk=False)
+            merged = []
+            for tag, a, b, c, d in matcher.get_opcodes():
+                for offset in range(max(b-a, d-c)):
+                    row = dict(alignment[a+offset]) if a+offset < b else {"clevercad": None, "hastus": None, "status": "final_only", "fields": []}
+                    row["final"] = final_side["stops"][c+offset] if c+offset < d else None
+                    final_id = (row["final"] or {}).get("canonical_stop_id")
+                    matched = [label for label, key in (("CleverCAD", "clevercad"), ("HASTUS", "hastus")) if final_id and (row.get(key) or {}).get("canonical_stop_id") == final_id]
+                    row["final_source"] = "Both" if len(matched) == 2 else matched[0] if matched else "Neither" if final_id else "Absent from final"
+                    merged.append(row)
+            alignment = merged
         return {
             "type": "trip",
             "sides": sides,
             "alignment": alignment,
             "differences": [row for row in alignment if row["status"] != "match"],
+            "final_supplied": bool(final_path),
             "route_short_name": context.get("route_short_name", ""),
             "headsign": context.get("headsign", ""),
             "first_time": context.get("first_time", ""),

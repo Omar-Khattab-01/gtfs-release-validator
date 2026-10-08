@@ -34,15 +34,15 @@
     <section class="panel setup-panel" id="setup-panel">
       <div class="section-heading">
         <div><span class="step">01</span><h3>Select source exports</h3></div>
-        <span class="quiet">CleverCAD + HASTUS required</span>
+        <span class="quiet">Two sources, or a final ZIP on its own</span>
       </div>
       <form id="run-form">
         <div class="input-stack">
-          <label for="clevercad-path"><span class="label-title">CleverCAD export ZIP</span><input id="clevercad-path" name="clevercad_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\CW-EXPORT.zip"></label>
-          <label for="hastus-path"><span class="label-title">HASTUS export ZIP</span><input id="hastus-path" name="hastus_path" type="text" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\HASTUS-EXPORT.zip"></label>
+          <label for="clevercad-path"><span class="label-title">CleverCAD export ZIP</span><input id="clevercad-path" name="clevercad_path" type="text" autocomplete="off" spellcheck="false" placeholder="C:\GTFS\CW-EXPORT.zip"></label>
+          <label for="hastus-path"><span class="label-title">HASTUS export ZIP</span><input id="hastus-path" name="hastus_path" type="text" autocomplete="off" spellcheck="false" placeholder="C:\GTFS\HASTUS-EXPORT.zip"></label>
           <label for="final-path"><span class="label-title">Final merged GTFS ZIP <span class="optional">Optional</span></span><input id="final-path" name="final_path" type="text" autocomplete="off" spellcheck="false" placeholder="Add later to verify the vendor output"></label>
         </div>
-        <div class="submit-row"><p class="field-help">Use full Windows paths. Leave the final field empty for the pre-vendor source check.</p><button type="submit" id="run-button">Run source preflight</button></div>
+        <div class="submit-row"><p class="field-help">Use full local paths. Supply both sources for comparison, add the final ZIP for merge review, or supply only the final ZIP for validation and browsing.</p><button type="submit" id="run-button">Validate &amp; inspect</button></div>
       </form>
     </section>
 
@@ -62,7 +62,19 @@
       <nav class="workspace-tabs" aria-label="Audit views">
         <button type="button" class="workspace-tab active" data-view="routes" aria-selected="true">Route variations</button>
         <button type="button" class="workspace-tab" data-view="stops" aria-selected="false">Stop mapping &amp; mismatches</button>
+        <button type="button" class="workspace-tab" data-view="viewer" aria-selected="false">Local feed viewer</button>
       </nav>
+      <section class="panel hidden" id="viewer-view">
+        <h3>Local feed viewer</h3>
+        <p>Browse any supplied feed. Shapes and stops are plotted locally; no map tiles or remote requests are used.</p>
+        <div class="stop-mapping-toolbar">
+          <label>Feed<select id="viewer-source"><option value="final">Final merged GTFS</option><option value="cad">CleverCAD</option><option value="hastus">HASTUS</option></select></label>
+          <label>Find route<input id="viewer-search" type="search" placeholder="Route number or name"></label>
+          <label>Raw table<select id="viewer-table"><option value="">Select a table</option></select></label>
+        </div>
+        <div id="viewer-routes" class="route-grid"></div>
+        <div id="viewer-content" aria-live="polite"></div>
+      </section>
 
       <section class="panel route-panel" id="route-view">
         <div class="section-heading compact">
@@ -141,7 +153,7 @@
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
-  <footer><span>GTFS Merge Auditor 0.7.1</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.8.0</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

@@ -684,6 +684,10 @@ def _audit_trip_patterns(
         key=lambda value: (not value.isdigit(), int(value) if value.isdigit() else value),
     )
     route_health = []
+    final_by_route: dict[str, dict[str, list[TripSummary]]] = defaultdict(lambda: defaultdict(list))
+    for variants in (final_summaries or {}).values():
+        for trip in variants:
+            final_by_route[trip.route_short_name][trip.stop_fingerprint].append(trip)
     for route_name in route_names:
         cad_count = sum(key[0] == route_name for key in cad_journeys)
         hastus_count = sum(key[0] == route_name for key in hastus_journeys)
@@ -693,6 +697,17 @@ def _audit_trip_patterns(
         cad_variations = cad_catalog.get(route_name, [])
         hastus_variations = hastus_catalog.get(route_name, [])
         variation_pairs, direction_alignment = _pair_route_variations(cad_variations, hastus_variations, journey_pair_counts.get(route_name, {}))
+        final_variations = []
+        for index, (fingerprint, trips) in enumerate(sorted(final_by_route.get(route_name, {}).items()), 1):
+            final_variations.append({"variation_id": f"Final V{index}", "pattern_fingerprint": fingerprint,
+                "example_trip_id": trips[0].trip_id, "trip_count": len(trips), "stop_count": trips[0].stop_count,
+                "direction_ids": sorted({trip.direction_id for trip in trips}),
+                "headsigns": sorted({trip.headsign for trip in trips}), "shape_ids": sorted({trip.shape_id for trip in trips})})
+        for pair in variation_pairs:
+            cad_pattern = next((item for item in cad_variations if item["variation_id"] == pair["clevercad_variation_id"]), None)
+            hastus_pattern = next((item for item in hastus_variations if item["variation_id"] == pair["hastus_variation_id"]), None)
+            pair["final_matches"] = [{**item, "matches_source": "Both" if cad_pattern and hastus_pattern and item["pattern_fingerprint"] == cad_pattern["pattern_fingerprint"] == hastus_pattern["pattern_fingerprint"] else "CleverCAD" if cad_pattern and item["pattern_fingerprint"] == cad_pattern["pattern_fingerprint"] else "HASTUS"}
+                for item in final_variations if any(source and source["pattern_fingerprint"] == item["pattern_fingerprint"] for source in (cad_pattern, hastus_pattern))]
         cad_by_variation = {str(item["variation_id"]): item for item in cad_variations}
         hastus_by_variation = {str(item["variation_id"]): item for item in hastus_variations}
         paired = [item for item in variation_pairs if item["status"] != "not_comparable"]
@@ -763,6 +778,7 @@ def _audit_trip_patterns(
                 "direction_alignment": direction_alignment,
                 "variation_scope": variation_scope,
                 "variation_pairs": variation_pairs,
+                "final_variations": final_variations,
                 "clevercad_variations": public_cad_variations,
                 "hastus_variations": public_hastus_variations,
             }
@@ -1087,7 +1103,7 @@ def validate_exports(
             for feed in loaded
         }
         if cad and hastus:
-            hastus_translation = _hastus_stop_translation(cad, hastus, final)
+            hastus_translation = _hastus_stop_translation(cad, hastus)
             cad_summaries = _trip_summaries(cad, {}, report)
             hastus_summaries = _trip_summaries(hastus, hastus_translation, report)
             final_summaries = _trip_summaries(final, {}, report) if final else None

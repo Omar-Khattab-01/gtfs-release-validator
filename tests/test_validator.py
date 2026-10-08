@@ -9,6 +9,8 @@ from pathlib import Path
 from gtfs_validator.details import build_detail
 from gtfs_validator.engine import validate_feed
 from gtfs_validator.merge import validate_exports, validate_merge
+from gtfs_validator import viewer
+from gtfs_validator.web import Job, _run_job
 
 
 FILES = {
@@ -37,6 +39,59 @@ def write_feed(path: Path, *, mode: int = 0o644, extra: dict[str, str] | None = 
 
 
 class ValidatorTests(unittest.TestCase):
+    def test_viewer_reads_interleaved_stop_times(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "feed.zip"
+            lines = FILES["stop_times.txt"].splitlines()
+            times = "\n".join([lines[0], lines[1], lines[1].replace("t1,", "other,"), lines[2]]) + "\n"
+            write_feed(path, extra={"stop_times.txt": times})
+            detail = viewer.trip_detail(str(path), "t1")
+            self.assertEqual(["10017", "20000"], [stop["source_stop_id"] for stop in detail["stops"]])
+
+    def test_final_pattern_choices_and_three_column_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cad, hastus, final = [Path(temp_dir) / name for name in ("cad.zip", "hastus.zip", "final.zip")]
+            write_feed(cad)
+            write_feed(hastus, extra={"stop_times.txt": FILES["stop_times.txt"].replace("10017,1", "10014,1")})
+            write_feed(final)
+            report = validate_exports(cad, hastus, final)
+            route = report.stats["trip_reconciliation"]["route_health"][0]
+            pair = route["variation_pairs"][0]
+            self.assertEqual("CleverCAD", pair["final_matches"][0]["matches_source"])
+            detail = build_detail({"rule_id": "TRP103", "context": {"clevercad_trip_id": "t1", "hastus_trip_id": "t1", "final_trip_id": "t1"}}, str(cad), str(hastus), str(final))
+            self.assertEqual(3, len(detail["sides"]))
+            self.assertEqual("CleverCAD", detail["alignment"][0]["final_source"])
+            self.assertEqual("Both", detail["alignment"][1]["final_source"])
+            write_feed(final, extra={"stop_times.txt": FILES["stop_times.txt"].replace("10017,1", "10014,1")})
+            report = validate_exports(cad, hastus, final)
+            pair = report.stats["trip_reconciliation"]["route_health"][0]["variation_pairs"][0]
+            self.assertEqual("HASTUS", pair["final_matches"][0]["matches_source"])
+            detail = build_detail({"rule_id": "TRP103", "context": {"clevercad_trip_id": "t1", "hastus_trip_id": "t1", "final_trip_id": "t1"}}, str(cad), str(hastus), str(final))
+            self.assertEqual("HASTUS", detail["alignment"][0]["final_source"])
+
+    def test_source_only_variation_can_be_inspected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "source.zip"
+            write_feed(path)
+            detail = build_detail({"rule_id": "TRP102", "context": {"hastus_trip_id": "t1"}}, str(path), str(path))
+            self.assertEqual(2, len(detail["alignment"]))
+            self.assertEqual("hastus_only", detail["alignment"][0]["status"])
+            self.assertEqual(1, len(viewer.route_detail(str(path), "r19")["variations"]))
+            self.assertEqual(2, len(viewer.trip_detail(str(path), "t1")["shape"]))
+
+    def test_final_only_job_validates_and_browses_raw_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "final.zip"
+            write_feed(path)
+            job = Job(id="test", clevercad_path="", hastus_path="", final_path=str(path))
+            _run_job(job)
+            self.assertEqual("complete", job.status)
+            self.assertEqual("ELIGIBLE FOR APPROVAL", job.report["decision"])
+            self.assertEqual(1, len(viewer.inventory(str(path))["routes"]))
+            page = viewer.table_page(str(path), "stops.txt", 0, 1)
+            self.assertTrue(page["has_more"])
+            self.assertEqual("10014", page["rows"][0]["stop_id"])
+
     def test_valid_minimal_feed_has_no_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "valid.zip"
