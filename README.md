@@ -31,6 +31,22 @@ checks, and issue highlights. Its files are read directly in the browser and
 never uploaded. No Node installation is needed to run the bundled viewer.
 Build attribution is recorded in THIRD_PARTY.md.
 
+### Fast local browsing
+
+During the first audit, the **Preparing fast browsing** stage streams each
+archive into a temporary, disk-backed SQLite index. Routes, trips, comparison
+evidence, shapes, and raw-table pages then use indexed lookups rather than
+repeatedly decompressing and scanning entire GTFS tables. The original ZIPs
+are never edited or unpacked into your project directory.
+
+Indexes are reused across audits in the same app session. Up to six feeds are
+cached; changing a feed's size or modification metadata triggers a new index.
+Temporary indexes are removed when released or the app exits normally. They
+consume local temporary disk space (potentially more than the uncompressed
+GTFS); only the smaller route, stop, and trip tables stay in memory. No extra
+Python packages are required. Initial validation and indexing still take time;
+this improvement primarily speeds up navigation after results are ready.
+
 ## Windows setup and launch
 
 Requirements: Windows 10/11 and Python 3.10 or newer from <https://www.python.org/downloads/windows/>. During Python installation, enable **Add Python to PATH** and install the Python launcher.

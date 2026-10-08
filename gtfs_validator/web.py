@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import mimetypes
+import sqlite3
 import threading
 import uuid
 import webbrowser
@@ -19,6 +20,7 @@ from .details import build_detail
 from .merge import validate_merge
 from .engine import validate_feed
 from . import viewer
+from .feed_index import get_index, clear_indexes
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -33,6 +35,7 @@ class Job:
     hastus_path: str
     final_path: str = ""
     status: str = "queued"
+    progress: str = "Waiting to start"
     error: str | None = None
     report: dict[str, Any] | None = None
     details_cache: dict[int, dict[str, Any]] = field(default_factory=dict)
@@ -48,6 +51,7 @@ class Job:
                 "hastus_path": self.hastus_path,
                 "final_path": self.final_path,
                 "status": self.status,
+                "progress": self.progress,
                 "error": self.error,
             }
             if self.report is not None:
@@ -62,13 +66,28 @@ JOBS_LOCK = threading.Lock()
 def _run_job(job: Job) -> None:
     with job.lock:
         job.status = "running"
+        job.progress = "Validating ZIPs and comparing exports"
     try:
         report = validate_merge(job.clevercad_path, job.hastus_path, job.final_path) if job.clevercad_path and job.hastus_path else validate_feed(job.final_path)
         if not job.clevercad_path and not job.hastus_path:
             report.stats["inputs"] = {"Final merged GTFS": {"path": job.final_path, "sha256": report.sha256}}
+        index_errors = []
+        for label, path in (("CleverCAD", job.clevercad_path), ("HASTUS", job.hastus_path), ("Final GTFS", job.final_path)):
+            if not path:
+                continue
+            with job.lock:
+                job.progress = f"Preparing fast browsing: {label} (one-time local indexing)"
+            try:
+                get_index(path)
+            except (OSError, KeyError, ValueError, UnicodeError, csv.Error, zipfile.BadZipFile, RuntimeError, sqlite3.Error) as exc:
+                # A malformed feed must still display its validation findings.
+                index_errors.append(f"{label}: {exc}")
+        if index_errors:
+            report.stats["browse_index_errors"] = index_errors
         with job.lock:
             job.report = report.to_dict()
             job.status = "complete"
+            job.progress = "Ready"
     except Exception as exc:  # Last-resort isolation for the web worker.
         with job.lock:
             job.error = f"{type(exc).__name__}: {exc}"
@@ -81,7 +100,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.8.0"
+    server_version = "GTFSValidator/0.8.1"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -160,7 +179,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                         with job.lock:
                             job.viewer_cache[key] = data
                     return self._json(HTTPStatus.OK, data)
-                except (OSError, KeyError, ValueError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile) as exc:
+                except (OSError, KeyError, ValueError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile, sqlite3.Error) as exc:
                     return self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": f"Could not inspect feed: {exc}"})
             if len(parts) == 4 and parts[3] == "report.json":
                 payload = job.public()
@@ -203,7 +222,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                             job.hastus_path,
                             job.final_path,
                         )
-                    except (OSError, KeyError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile) as exc:
+                    except (OSError, KeyError, ValueError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile, sqlite3.Error) as exc:
                         return self._json(
                             HTTPStatus.UNPROCESSABLE_ENTITY,
                             {"error": f"Could not load detail evidence: {exc}"},
@@ -239,7 +258,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                             job.hastus_path,
                             job.final_path,
                         )
-                    except (OSError, KeyError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile) as exc:
+                    except (OSError, KeyError, ValueError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile, sqlite3.Error) as exc:
                         return self._json(
                             HTTPStatus.UNPROCESSABLE_ENTITY,
                             {"error": f"Could not load variation evidence: {exc}"},
@@ -330,3 +349,4 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False)
         pass
     finally:
         server.server_close()
+        clear_indexes()

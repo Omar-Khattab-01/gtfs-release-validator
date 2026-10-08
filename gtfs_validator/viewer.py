@@ -1,11 +1,9 @@
 """Read-only local feed browsing. No remote maps or services."""
 from __future__ import annotations
 
-import csv
-import io
-import zipfile
 from collections import defaultdict
 from .details import _rows, _stop_index, _trip_stop_times
+from .feed_index import get_index
 
 
 def inventory(path: str) -> dict:
@@ -14,19 +12,16 @@ def inventory(path: str) -> dict:
     counts = defaultdict(int)
     for trip in trips:
         counts[trip.get("route_id", "")] += 1
-    with zipfile.ZipFile(path) as archive:
-        files = [{"name": item.filename, "bytes": item.file_size} for item in archive.infolist() if not item.is_dir()]
+    files = get_index(path).files
     return {"routes": sorted([{**row, "trip_count": counts[row.get("route_id", "")]} for row in routes], key=lambda row: (not row.get("route_short_name", "").isdigit(), int(row["route_short_name"]) if row.get("route_short_name", "").isdigit() else row.get("route_short_name", ""))), "files": files}
 
 
 def route_detail(path: str, route_id: str) -> dict:
-    trips = [row for row in _rows(path, "trips.txt") if row.get("route_id") == route_id]
-    by_id = {trip["trip_id"]: trip for trip in trips}
+    index = get_index(path)
+    trips = index.lookup("trips.txt", route_id)
     times = defaultdict(list)
-    with zipfile.ZipFile(path) as archive, archive.open("stop_times.txt") as raw:
-        for row in csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")):
-            if row.get("trip_id") in by_id:
-                times[row["trip_id"]].append(row)
+    for row in index.lookup_many("stop_times.txt", list({trip["trip_id"] for trip in trips})):
+        times[row["trip_id"]].append(row)
     groups = defaultdict(list)
     for trip in trips:
         rows = sorted(times[trip["trip_id"]], key=lambda row: int(row.get("stop_sequence") or 0))
@@ -37,32 +32,18 @@ def route_detail(path: str, route_id: str) -> dict:
 
 
 def trip_detail(path: str, trip_id: str) -> dict:
-    trip = next((row for row in _rows(path, "trips.txt") if row.get("trip_id") == trip_id), None)
+    index = get_index(path)
+    trips = index.lookup("trips.txt", trip_id, entity=True)
+    trip = trips[0] if trips else None
     if trip is None:
         raise ValueError("Trip not found in this feed")
     stops = _trip_stop_times(path, trip_id, _stop_index(path))
     shape = []
-    with zipfile.ZipFile(path) as archive:
-        if "shapes.txt" in archive.namelist() and trip.get("shape_id"):
-            with archive.open("shapes.txt") as raw:
-                for row in csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")):
-                    if row.get("shape_id") == trip["shape_id"]:
-                        shape.append(row)
+    if "shapes.txt" in index.columns and trip.get("shape_id"):
+        shape = index.lookup("shapes.txt", trip["shape_id"])
     shape.sort(key=lambda row: int(row.get("shape_pt_sequence") or 0))
     return {"trip": trip, "stops": stops, "shape": shape}
 
 
 def table_page(path: str, name: str, offset: int = 0, limit: int = 100) -> dict:
-    with zipfile.ZipFile(path) as archive:
-        if name not in archive.namelist() or not name.endswith(".txt"):
-            raise ValueError("Unknown GTFS table")
-        with archive.open(name) as raw:
-            reader = csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig", newline=""))
-            rows = []
-            for index, row in enumerate(reader):
-                if index < offset:
-                    continue
-                rows.append(row)
-                if len(rows) > limit:
-                    break
-            return {"columns": reader.fieldnames or [], "rows": rows[:limit], "offset": offset, "has_more": len(rows) > limit}
+    return get_index(path).page(name, max(0, offset), min(100, max(1, limit)))

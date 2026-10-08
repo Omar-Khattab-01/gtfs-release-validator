@@ -27,6 +27,7 @@ let pageLimit = 60;
 const selected = new Set();
 let viewerInventory = {routes: [], files: []};
 let viewerRequest = 0;
+let viewerTripRequest = 0;
 
 async function viewerFetch(params = {}) {
   const query = new URLSearchParams({source: document.querySelector('#viewer-source').value, ...params});
@@ -98,22 +99,25 @@ function renderShapeMap(data) {
 }
 
 async function openViewerTrip(tripId) {
+  const request = ++viewerTripRequest;
   const target = document.querySelector('#viewer-trip-detail');
   if (!target) return;
   target.textContent = 'Loading trip stops and shape…';
   try {
     const data = await viewerFetch({trip_id: tripId});
-    if (document.querySelector('#viewer-trip-choice')?.value !== tripId) return;
+    if (request !== viewerTripRequest || !target.isConnected || document.querySelector('#viewer-trip-choice')?.value !== tripId) return;
     target.innerHTML = renderShapeMap(data) + sourceCard('Trip attributes', data.trip) + `<div class="comparison-table"><table><thead><tr><th>Sequence</th><th>Stop</th><th>Arrival</th><th>Departure</th><th>Pickup / drop-off</th></tr></thead><tbody>${data.stops.map(stop => `<tr><td>${escapeHtml(stop.sequence)}</td><td><details><summary>${escapeHtml(stop.stop_name)} · ${escapeHtml(stop.source_stop_id)}</summary>${sourceCard('Stop attributes', stop.source_record)}</details></td><td>${escapeHtml(stop.arrival_time)}</td><td>${escapeHtml(stop.departure_time)}</td><td>${escapeHtml(stop.pickup_type)} / ${escapeHtml(stop.drop_off_type)}</td></tr>`).join('')}</tbody></table></div>`;
   } catch (error) { target.textContent = error.message; }
 }
 
 async function openViewerTable(offset = 0) {
+  const request = ++viewerRequest;
   const target = document.querySelector('#viewer-content');
   const name = document.querySelector('#viewer-table').value;
   if (!name) return;
   try {
     const data = await viewerFetch({table:name, offset});
+    if (request !== viewerRequest) return;
     target.innerHTML = `<h4>${escapeHtml(name)} · rows ${offset+1}–${offset+data.rows.length}</h4><div class="comparison-table"><table><thead><tr>${data.columns.map(column => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${data.rows.map(row => `<tr>${data.columns.map(column => `<td>${escapeHtml(row[column])}</td>`).join('')}</tr>`).join('')}</tbody></table></div><button id="table-prev" ${offset === 0 ? 'disabled' : ''}>Previous 100</button><button id="table-next" ${data.has_more ? '' : 'disabled'}>Next 100</button>`;
     document.querySelector('#table-prev').addEventListener('click', () => openViewerTable(Math.max(0, offset-100)));
     document.querySelector('#table-next').addEventListener('click', () => openViewerTable(offset+100));
@@ -141,6 +145,7 @@ form.addEventListener('submit', async (event) => {
   event.preventDefault();
   runButton.disabled = true;
   runningPanel.classList.remove('hidden');
+  document.querySelector('#run-progress').textContent = 'Validating ZIPs and comparing exports…';
   results.classList.add('hidden');
   selected.clear();
   try {
@@ -168,6 +173,7 @@ async function poll(id) {
   while (true) {
     const response = await fetch(`/api/runs/${id}`, {cache: 'no-store'});
     const payload = await response.json();
+    document.querySelector('#run-progress').textContent = payload.progress || 'Audit in progress…';
     if (payload.status === 'complete') {
       runningPanel.classList.add('hidden');
       renderReport(payload.report, id);

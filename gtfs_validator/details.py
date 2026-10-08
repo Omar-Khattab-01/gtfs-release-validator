@@ -1,29 +1,21 @@
 from __future__ import annotations
 
-import csv
 import difflib
-import io
 import math
-import zipfile
-from pathlib import Path
 from typing import Any
+from .feed_index import get_index
 
 
 def _rows(path: str, file_name: str) -> list[dict[str, str]]:
-    with zipfile.ZipFile(Path(path)) as archive, archive.open(file_name) as raw:
-        text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
-        return [
-            {str(key).strip(): (value or "").strip() for key, value in row.items()}
-            for row in csv.DictReader(text)
-        ]
+    return get_index(path).rows(file_name)
 
 
 def _stop_index(path: str) -> dict[str, dict[str, str]]:
-    return {row.get("stop_id", ""): row for row in _rows(path, "stops.txt")}
+    return get_index(path).stops
 
 
 def _trip_ids(path: str) -> set[str]:
-    return {row.get("trip_id", "") for row in _rows(path, "trips.txt")}
+    return get_index(path).trip_ids
 
 
 def _trip_stop_times(
@@ -33,27 +25,22 @@ def _trip_stop_times(
     translation: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    with zipfile.ZipFile(Path(path)) as archive, archive.open("stop_times.txt") as raw:
-        text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
-        for row in csv.DictReader(text):
-            current_trip = (row.get("trip_id") or "").strip()
-            if current_trip != trip_id:
-                continue
-            source_stop_id = (row.get("stop_id") or "").strip()
-            stop = stop_names.get(source_stop_id, {})
-            result.append(
-                {
-                    "sequence": (row.get("stop_sequence") or "").strip(),
-                    "source_stop_id": source_stop_id,
-                    "canonical_stop_id": (translation or {}).get(source_stop_id, source_stop_id),
-                    "stop_name": stop.get("stop_name", ""),
-                    "arrival_time": (row.get("arrival_time") or "").strip(),
-                    "departure_time": (row.get("departure_time") or "").strip(),
-                    "pickup_type": (row.get("pickup_type") or "").strip(),
-                    "drop_off_type": (row.get("drop_off_type") or "").strip(),
-                    "source_record": stop,
-                }
-            )
+    for row in get_index(path).lookup("stop_times.txt", trip_id):
+        source_stop_id = (row.get("stop_id") or "").strip()
+        stop = stop_names.get(source_stop_id, {})
+        result.append(
+            {
+                "sequence": (row.get("stop_sequence") or "").strip(),
+                "source_stop_id": source_stop_id,
+                "canonical_stop_id": (translation or {}).get(source_stop_id, source_stop_id),
+                "stop_name": stop.get("stop_name", ""),
+                "arrival_time": (row.get("arrival_time") or "").strip(),
+                "departure_time": (row.get("departure_time") or "").strip(),
+                "pickup_type": (row.get("pickup_type") or "").strip(),
+                "drop_off_type": (row.get("drop_off_type") or "").strip(),
+                "source_record": stop,
+            }
+        )
     def sequence_key(item: dict[str, Any]) -> tuple[int, str]:
         try:
             return (int(item["sequence"]), item["sequence"])
