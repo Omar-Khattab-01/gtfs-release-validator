@@ -118,7 +118,7 @@ async function openViewerTable(offset = 0) {
   try {
     const data = await viewerFetch({table:name, offset});
     if (request !== viewerRequest) return;
-    target.innerHTML = `<h4>${escapeHtml(name)} · rows ${offset+1}–${offset+data.rows.length}</h4><div class="comparison-table"><table><thead><tr>${data.columns.map(column => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${data.rows.map(row => `<tr>${data.columns.map(column => `<td>${escapeHtml(row[column])}</td>`).join('')}</tr>`).join('')}</tbody></table></div><button id="table-prev" ${offset === 0 ? 'disabled' : ''}>Previous 100</button><button id="table-next" ${data.has_more ? '' : 'disabled'}>Next 100</button>`;
+    target.innerHTML = `<h4>${escapeHtml(name)} · CSV rows ${offset+2}–${offset+data.rows.length+1} (header is row 1)</h4><div class="comparison-table"><table><thead><tr><th>CSV row</th>${data.columns.map(column => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${data.rows.map((row,index) => `<tr><td>${offset+index+2}</td>${data.columns.map(column => `<td>${escapeHtml(row[column])}</td>`).join('')}</tr>`).join('')}</tbody></table></div><button id="table-prev" ${offset === 0 ? 'disabled' : ''}>Previous 100</button><button id="table-next" ${data.has_more ? '' : 'disabled'}>Next 100</button>`;
     document.querySelector('#table-prev').addEventListener('click', () => openViewerTable(Math.max(0, offset-100)));
     document.querySelector('#table-next').addEventListener('click', () => openViewerTable(offset+100));
   } catch (error) { target.textContent = error.message; }
@@ -141,6 +141,61 @@ const ruleGuidance = {
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const formatBytes = (bytes) => bytes == null ? '—' : new Intl.NumberFormat().format(bytes) + ' B';
 
+const today = new Date();
+document.querySelector('#validation-date').value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+async function refreshCache(clear = false) {
+  try {
+    const response = await fetch(clear ? '/api/cache/clear' : '/api/cache', clear ? {method:'POST', headers:{'Content-Type':'application/json','X-GTFS-Validator':'1'}, body:'{}'} : {});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Cache unavailable');
+    document.querySelector('#cache-summary').textContent = `${data.entries.length} saved indexes · ${formatBytes(data.bytes)} · ${data.directory}${data.cleanup ? ` · Removed ${data.cleanup.removed.length}; ${data.cleanup.skipped.length} active/protected indexes retained` : ''}`;
+  } catch (error) { document.querySelector('#cache-summary').textContent = error.message; }
+}
+document.querySelector('#cache-refresh').addEventListener('click', () => refreshCache());
+document.querySelector('#cache-clear').addEventListener('click', () => { if (confirm('Remove unused saved indexes? Your original ZIPs and indexes used by active runs are kept.')) refreshCache(true); });
+refreshCache();
+
+function renderFinalValidation(payload) {
+  document.querySelector('#index-summary').textContent = (payload.index_status || []).map(item => `${item.source}: ${item.status}${item.warning ? ' — '+item.warning : ''}`).join(' · ');
+  const target = document.querySelector('#final-content');
+  const validation = payload.final_validation;
+  if (!validation) { target.textContent = 'No final merged GTFS supplied. Source comparison is available in the other tabs.'; return; }
+  const counts = data => Object.entries(data.counts || {}).map(([key,value]) => `${value} ${key.toLowerCase()}`).join(' · ');
+  const state = (title, data) => `<h3>${title}</h3><p>${escapeHtml(data.status)} · ${escapeHtml(counts(data))}</p>${data.message ? `<pre>${escapeHtml(data.message)}</pre>` : ''}`;
+  const rowButton = (file,row,field='') => file && Number.isInteger(Number(row)) && Number(row)>=2 ? ` <button class="final-evidence" data-file="${escapeHtml(file)}" data-row="${row}" data-field="${escapeHtml(field)}">Inspect ${escapeHtml(file)} CSV row ${row}</button>` : '';
+  const evidence = (file, item) => `<li>${escapeHtml(item.message)}${rowButton(file,item.row,item.field)}</li>`;
+  const mobilityEvidence = item => (item.sampleNotices || []).map(sample => {
+    const knownFiles = {feed_expiration_date30_days:'feed_info.txt',missing_feed_contact_email_and_url:'feed_info.txt',platform_without_parent_station:'stops.txt',decreasing_or_equal_stop_time_distance:'stop_times.txt'};
+    const file = sample.filename || knownFiles[item.code];
+    return `<details><summary>Sample evidence</summary><pre>${escapeHtml(JSON.stringify(sample,null,2))}</pre>${rowButton(file,sample.csvRowNumber,sample.fieldName)}${rowButton('trips.txt',sample.tripCsvRowNumber)}${rowButton('stop_times.txt',sample.stopTimeCsvRowNumber)}</details>`;
+  }).join('');
+  target.innerHTML = `<p>Final-feed checks are independent of source comparisons. Agency-profile expectations are not universal GTFS requirements. Skipped or unavailable engines are not passes.</p><a href="/api/runs/${payload.id}/final-validation.json" download>Download final validation evidence (JSON)</a>`
+    + state('GTFS technical checks', validation.technical)
+    + `<details><summary>View technical findings</summary><ul>${(validation.technical.findings || []).map(item => `<li>${escapeHtml(item.rule_id)} · ${escapeHtml(item.message)}${rowButton(item.file,item.row)}</li>`).join('')}</ul></details>`
+    + state('Your agency validation profile', validation.agency)
+    + (validation.agency.files || []).map(file => `<details class="validation-file"><summary>${escapeHtml(file.file)} · ${escapeHtml(file.status)} · ${escapeHtml(counts(file))}</summary>${['errors','warnings','info'].map(key => `<h4>${key} (${file.counts[key]})</h4><ul>${file[key].map(item => evidence(file.file,item)).join('')}</ul>${file.counts[key] > file[key].length ? '<p>Showing the first 250 examples. Counts include all findings.</p>' : ''}`).join('')}</details>`).join('')
+    + state('MobilityData canonical validator (local)', validation.mobility)
+    + (validation.mobility.status === 'complete' ? `<a href="/api/runs/${payload.id}/mobility-report.html" download>Download MobilityData HTML report</a>` : '')
+    + (validation.mobility.notices || []).map(item => `<details class="validation-file"><summary>${escapeHtml(item.severity)} · ${escapeHtml(item.code)} · ${item.totalNotices} occurrences</summary><p>Sample evidence supplied by MobilityData:</p>${mobilityEvidence(item)}</details>`).join('');
+  target.querySelectorAll('.final-evidence').forEach(button => button.addEventListener('click', async () => {
+    document.querySelector('#viewer-source').value = 'final';
+    await loadViewer();
+    document.querySelector('.workspace-tab[data-view="viewer"]').click();
+    document.querySelector('#viewer-table').value = button.dataset.file;
+    const record = Number(button.dataset.row)-2;
+    const offset = Math.max(0, Math.floor(record/100)*100);
+    await openViewerTable(offset);
+    const row = document.querySelectorAll('#viewer-content tbody tr')[record-offset];
+    if (row) {
+      row.classList.add('evidence-row');
+      const headers = [...document.querySelectorAll('#viewer-content th')];
+      const fieldIndex = headers.findIndex(header => header.textContent === button.dataset.field);
+      if (fieldIndex >= 0) row.children[fieldIndex].classList.add('evidence-field');
+      row.scrollIntoView({block:'center'});
+    }
+  }));
+}
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   runButton.disabled = true;
@@ -155,7 +210,14 @@ form.addEventListener('submit', async (event) => {
       body: JSON.stringify({
         clevercad_path: clevercadInput.value.trim(),
         hastus_path: hastusInput.value.trim(),
-        final_path: finalInput.value.trim()
+        final_path: finalInput.value.trim(),
+        save_indexes: document.querySelector('#save-indexes').checked,
+        run_agency: document.querySelector('#run-agency').checked,
+        run_mobility: document.querySelector('#run-mobility').checked,
+        release_policy: document.querySelector('#release-policy').checked,
+        validation_date: document.querySelector('#validation-date').value,
+        mobility_jar: document.querySelector('#mobility-jar').value.trim(),
+        sort_reference: document.querySelector('#sort-reference').value.trim()
       })
     });
     const payload = await response.json();
@@ -177,6 +239,8 @@ async function poll(id) {
     if (payload.status === 'complete') {
       runningPanel.classList.add('hidden');
       renderReport(payload.report, id);
+      renderFinalValidation(payload);
+      refreshCache();
       return;
     }
     if (payload.status === 'failed') throw new Error(payload.error || 'Validation failed');
@@ -396,6 +460,7 @@ function renderFindings() {
   loadMore.classList.toggle('hidden', visible.length >= filteredFindings.length);
   loadMore.textContent = `Show ${Math.min(100, filteredFindings.length - visible.length)} more`;
   list.innerHTML = visible.map(f => {
+    if (f.rule_id === 'FINAL001') return `<article class="finding-card"><input class="finding-select" type="checkbox" aria-label="Select finding ${escapeHtml(f.rule_id)}" data-index="${f._index}" ${selected.has(f._index) ? 'checked' : ''}><button type="button" class="finding-open" data-index="${f._index}"><span class="pill ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span><h4>${escapeHtml(f.title)}</h4><p>${escapeHtml(f.message)}</p><span>Open Final GTFS validation →</span></button></article>`;
     const [left, right] = previewValues(f);
     const cadVariations = (f.context?.clevercad_variation_ids || [f.context?.clevercad_variation_id]).filter(Boolean).join(', ');
     const hastusVariations = (f.context?.hastus_variation_ids || [f.context?.hastus_variation_id]).filter(Boolean).join(', ');
@@ -504,6 +569,11 @@ function renderPackaging(report) {
 async function openDetail(index) {
   const finding = activeFindings.find(item => item._index === index);
   if (!finding) return;
+  if (finding.rule_id === 'FINAL001') {
+    document.querySelector('.workspace-tab[data-view="final"]').click();
+    document.querySelector('#final-view').scrollIntoView({block:'start'});
+    return;
+  }
   document.querySelector('#detail-title').textContent = finding.title;
   document.querySelector('#drawer-body').innerHTML = '<div class="loading-detail"><div class="spinner"></div><p>Loading source evidence…</p></div>';
   drawer.classList.remove('hidden');
@@ -628,6 +698,7 @@ document.querySelectorAll('.workspace-tab').forEach(tab => tab.addEventListener(
   document.querySelector('#route-view').classList.toggle('hidden', tab.dataset.view !== 'routes');
   document.querySelector('#stop-view').classList.toggle('hidden', tab.dataset.view !== 'stops');
   document.querySelector('#viewer-view').classList.toggle('hidden', tab.dataset.view !== 'viewer');
+  document.querySelector('#final-view').classList.toggle('hidden', tab.dataset.view !== 'final');
 }));
 stopMappingSearch.addEventListener('input', () => { stopMappingLimit = 80; renderStopMappingRows(); });
 stopMappingFilter.addEventListener('change', () => { stopMappingLimit = 80; renderStopMappingRows(); });

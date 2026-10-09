@@ -13,3 +13,15 @@ Build: `npm ci --ignore-scripts` then
 
 The viewer includes React (MIT), JSZip (MIT), and Papa Parse (MIT).
 Upstream license notices are included alongside the generated assets.
+
+# Local validation engines
+
+The agency profile in `gtfs_validator/agency_source.py` is adapted from the
+Python validator supplied by the repository owner on October 9, 2026. Its route
+sort-order reference was supplied by the owner. Agency-specific policy and
+known exceptions are displayed separately from GTFS specification checks.
+
+MobilityData's canonical GTFS validator is optional and downloaded from
+https://github.com/MobilityData/gtfs-validator using its official release assets.
+The Java JAR is not redistributed in this repository. Its upstream project is
+licensed under Apache-2.0. The local adapter was tested with CLI v8.0.1.

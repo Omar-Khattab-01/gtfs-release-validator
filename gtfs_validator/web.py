@@ -9,6 +9,7 @@ import threading
 import uuid
 import webbrowser
 import zipfile
+from datetime import date
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,7 +21,8 @@ from .details import build_detail
 from .merge import validate_merge
 from .engine import validate_feed
 from . import viewer
-from .feed_index import get_index, clear_indexes
+from .feed_index import get_index, clear_indexes, cache_info
+from .final_checks import agency_checks, mobility_checks, offline_mobility_report
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -36,6 +38,16 @@ class Job:
     final_path: str = ""
     status: str = "queued"
     progress: str = "Waiting to start"
+    save_indexes: bool = False
+    run_agency: bool = False
+    run_mobility: bool = False
+    release_policy: bool = True
+    validation_date: str = field(default_factory=lambda: date.today().isoformat())
+    mobility_jar: str = ""
+    sort_reference: str = ""
+    final_validation: dict | None = None
+    mobility_folder: Any = None
+    index_status: list = field(default_factory=list)
     error: str | None = None
     report: dict[str, Any] | None = None
     details_cache: dict[int, dict[str, Any]] = field(default_factory=dict)
@@ -53,6 +65,8 @@ class Job:
                 "status": self.status,
                 "progress": self.progress,
                 "error": self.error,
+                "final_validation": self.final_validation,
+                "index_status": self.index_status,
             }
             if self.report is not None:
                 payload["report"] = self.report
@@ -78,12 +92,41 @@ def _run_job(job: Job) -> None:
             with job.lock:
                 job.progress = f"Preparing fast browsing: {label} (one-time local indexing)"
             try:
-                get_index(path)
+                index = get_index(path, persist=job.save_indexes)
+                job.index_status.append({"source": label, "status": index.cache_status, "warning": index.cache_warning})
             except (OSError, KeyError, ValueError, UnicodeError, csv.Error, zipfile.BadZipFile, RuntimeError, sqlite3.Error) as exc:
                 # A malformed feed must still display its validation findings.
                 index_errors.append(f"{label}: {exc}")
         if index_errors:
             report.stats["browse_index_errors"] = index_errors
+        if job.final_path:
+            technical = report.stats.pop("final_technical_findings", None)
+            if technical is None:
+                technical = [item.to_dict() for item in report.findings]
+            final = {"technical": {"status": "complete", "counts": {level: sum(item["severity"] == level for item in technical) for level in ("blocker", "error", "warning", "info")},
+                                  "findings": technical},
+                     "agency": {"status": "not_requested"}, "mobility": {"status": "not_requested"}}
+            for engine, enabled in (("agency", job.run_agency), ("mobility", job.run_mobility)):
+                if not enabled:
+                    continue
+                with job.lock:
+                    job.progress = f"Checking final GTFS: {engine} validation"
+                try:
+                    if engine == "agency":
+                        result = agency_checks(job.final_path, job.validation_date, job.release_policy, job.sort_reference)
+                    else:
+                        result, job.mobility_folder = mobility_checks(job.final_path, job.validation_date, job.mobility_jar)
+                    final[engine] = result
+                    errors = result.get("counts", {}).get("errors", result.get("counts", {}).get("ERROR", 0))
+                    warnings = result.get("counts", {}).get("warnings", result.get("counts", {}).get("WARNING", 0))
+                    if result["status"] != "complete" or errors or warnings:
+                        report.add("FINAL001", "error" if errors else "warning", "Final validation", f"{engine} final-feed validation requires review",
+                                   result.get("message", f"{errors} errors, {warnings} warnings. Open the Final GTFS validation tab."), context={"engine": engine})
+                except Exception as exc:
+                    final[engine] = {"status": "failed", "message": str(exc)}
+                    report.add("FINAL001", "warning", "Final validation", f"{engine} checks could not complete", str(exc), context={"engine": engine})
+            job.final_validation = final
+            report.finish()
         with job.lock:
             job.report = report.to_dict()
             job.status = "complete"
@@ -100,7 +143,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.8.1"
+    server_version = "GTFSValidator/0.9.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -133,6 +176,8 @@ class ValidatorHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
         path = parsed_url.path
+        if path == "/api/cache":
+            return self._json(HTTPStatus.OK, cache_info())
         if path == "/":
             return self._serve_asset("index.html")
         if path.startswith("/file-viewer/"):
@@ -156,6 +201,13 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown run"})
             if len(parts) == 3:
                 return self._json(HTTPStatus.OK, job.public())
+            if len(parts) == 4 and parts[3] == "final-validation.json":
+                return self._download(json.dumps(job.public().get("final_validation"), ensure_ascii=False, indent=2).encode(), "final-validation.json", "application/json")
+            if len(parts) == 4 and parts[3] == "mobility-report.html":
+                result = (job.final_validation or {}).get("mobility", {})
+                if result.get("status") != "complete":
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "MobilityData report not available"})
+                return self._download(offline_mobility_report(result), "mobility-report.html", "text/html; charset=utf-8")
             if len(parts) == 4 and parts[3] == "viewer":
                 query = parse_qs(parsed_url.query)
                 get = lambda key, default="": str((query.get(key) or [default])[0])
@@ -269,7 +321,8 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         return self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/api/runs":
+        request_path = urlparse(self.path).path
+        if request_path not in {"/api/runs", "/api/cache/clear"}:
             return self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
         if self.headers.get("X-GTFS-Validator") != "1":
             return self._json(HTTPStatus.FORBIDDEN, {"error": "Missing local request header"})
@@ -283,6 +336,15 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid JSON"})
+        if not isinstance(payload, dict):
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": "Expected a JSON object"})
+        if request_path == "/api/cache/clear":
+            return self._json(HTTPStatus.OK, cache_info(remove_unused=True))
+        validation_date = str(payload.get("validation_date") or date.today().isoformat())
+        try:
+            date.fromisoformat(validation_date)
+        except ValueError:
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": "Validation date must use YYYY-MM-DD"})
         clevercad_path = str(payload.get("clevercad_path", "")).strip()
         hastus_path = str(payload.get("hastus_path", "")).strip()
         final_path = str(payload.get("final_path", "")).strip()
@@ -294,6 +356,13 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             clevercad_path=clevercad_path,
             hastus_path=hastus_path,
             final_path=final_path,
+            save_indexes=payload.get("save_indexes") is True,
+            run_agency=payload.get("run_agency") is True,
+            run_mobility=payload.get("run_mobility") is True,
+            validation_date=validation_date,
+            release_policy=payload.get("release_policy", True) is True,
+            mobility_jar=str(payload.get("mobility_jar", "")).strip(),
+            sort_reference=str(payload.get("sort_reference", "")).strip(),
         )
         with JOBS_LOCK:
             JOBS[job.id] = job

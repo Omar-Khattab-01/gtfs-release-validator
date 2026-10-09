@@ -252,3 +252,12 @@ footer { max-width: 1240px; margin: 0 auto; padding: 22px 28px; display: flex; j
   .stop-pair { grid-template-columns: 1fr; }
   .stop-pair > span { display: none; }
 }
+/* Final-feed validation and row-level evidence */
+.validation-options { margin-top: 18px; display: grid; gap: 12px; border: 1px solid #ccd7df; border-radius: 10px; padding: 18px; }
+.validation-options label { display: block; }
+.validation-options input[type="checkbox"] { width: auto; }
+.validation-file { padding: 14px; margin: 12px 0; border: 1px solid #ccd7df; border-radius: 8px; }
+.validation-file summary { cursor: pointer; font-weight: 600; }
+.validation-file pre, #final-content pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 500px; overflow: auto; }
+.evidence-row { background: #fff2bb; outline: 2px solid #b47600; }
+.evidence-field { background: #ffd578; font-weight: 700; }

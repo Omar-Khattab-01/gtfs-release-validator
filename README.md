@@ -34,18 +34,44 @@ Build attribution is recorded in THIRD_PARTY.md.
 ### Fast local browsing
 
 During the first audit, the **Preparing fast browsing** stage streams each
-archive into a temporary, disk-backed SQLite index. Routes, trips, comparison
+archive into a disk-backed SQLite index. Routes, trips, comparison
 evidence, shapes, and raw-table pages then use indexed lookups rather than
 repeatedly decompressing and scanning entire GTFS tables. The original ZIPs
 are never edited or unpacked into your project directory.
 
-Indexes are reused across audits in the same app session. Up to six feeds are
-cached; changing a feed's size or modification metadata triggers a new index.
-Temporary indexes are removed when released or the app exits normally. They
-consume local temporary disk space (potentially more than the uncompressed
-GTFS); only the smaller route, stop, and trip tables stay in memory. No extra
-Python packages are required. Initial validation and indexing still take time;
-this improvement primarily speeds up navigation after results are ready.
+With **Save indexes** enabled, all supplied feeds (both sources and the optional
+final) are saved automatically. SHA-256 content fingerprints and a schema version
+prevent reuse for changed feeds. Reopening after restarting reuses the saved
+database; validation still runs afresh. Disabling this option uses temporary
+indexes. First-time indexing still takes time.
+
+Windows storage: `%LOCALAPPDATA%\GTFS Merge Auditor\cache`. Override with
+`GTFS_VALIDATOR_CACHE_DIR`. Parsed feed data stays on disk, potentially larger
+than uncompressed GTFS. The cache has a 10 GB budget and removes unused entries
+older than 30 days when saving new indexes. Active indexes are protected.
+**Remove unused saved indexes** reclaims storage without deleting original ZIPs.
+If saving fails or the budget is exceeded, browsing uses a session-only index
+and shows a warning.
+
+### Final merged GTFS validation
+
+The **Final GTFS validation** tab separates three independent checks:
+
+- Existing technical and ZIP checks.
+- Your supplied Python agency profile, grouped by file, with expandable evidence.
+  Row findings open the local table at that CSV row. Your supplied
+  `routes_sort_order_list.csv` is bundled; a local override is available.
+  Agency expectations, known exceptions and empty-field rules are not universal
+  GTFS requirements. Friday/one-month release policy can be disabled independently.
+- MobilityData's canonical validator, run as a local Java process, with notice
+  groups, sample evidence and downloadable reports. Unavailable engines and
+  failures are explicitly reported, never represented as passes.
+
+The validation date is configurable. Large profile tables are processed in
+25,000-row batches. Each file keeps up to 250 examples per severity; counts
+include all findings. MobilityData provides its own sampled notices. Download
+final validation evidence separately from the source-comparison report.
+No feed is uploaded to MobilityData.
 
 ## Windows setup and launch
 
@@ -57,9 +83,17 @@ Double-click:
 start_windows.bat
 ```
 
-The launcher checks the Python version, starts the local server, and opens <http://127.0.0.1:8765> in the default browser. Keep the command window open while using the tool. Press `Ctrl+C` to stop it.
+The launcher checks Python, installs pandas and tzdata from `requirements.txt`
+if missing, starts the server, and opens <http://127.0.0.1:8765>. Keep the command
+window open while using the tool. Press `Ctrl+C` to stop it.
 
-No third-party Python packages or internet connection are required.
+For MobilityData checks, install Java 17 or newer and run
+`setup_mobilitydata.bat` once. It downloads the CLI JAR from MobilityData's
+official GitHub release into `.local-tools` (not committed to Git). Alternatively,
+supply an existing local CLI JAR path in the form. The Java process has a 2 GB
+heap cap and 15-minute timeout; large feeds need sufficient RAM and temporary
+disk space. Internet is needed for initial dependency/JAR setup only; all feed
+processing runs locally.
 
 ## Command line
 
@@ -85,7 +119,10 @@ Exit codes are `0` for eligible, `1` for needs review, and `2` for blocked.
 
 ## Reconciliation model
 
-The tool does not contain route- or incident-specific production rules. Previous incidents are represented as test cases for general rules. CleverCAD and HASTUS are the only required inputs.
+Source comparison rules are generic, not route- or incident-specific. Previous
+incidents are test cases for general rules. The optional supplied agency profile
+retains your agency's known exceptions and is labeled separately. CleverCAD and
+HASTUS are required only for source comparison; final-only validation is supported.
 
 For stops, it builds a crosswalk from the source identifiers:
 
@@ -114,7 +151,8 @@ When the optional final feed is supplied, it additionally detects:
 ## Final artifact checks
 
 - ZIP CRC, duplicate members, unsafe paths, encryption, compression limits, and root layout
-- stored and system-extracted `0644` permissions
+- stored and system-extracted readability (`0600` is blocked; `0644` recommended;
+  `0666` is readable; absent Windows/DOS Unix modes are informational)
 - required files/columns, UTF-8 and CSV structure, empty tables, and primary keys
 - route/trip/service/shape/stop and parent-station relationships
 - stop coordinates and route colours

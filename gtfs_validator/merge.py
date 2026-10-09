@@ -1087,6 +1087,7 @@ def validate_exports(
     final_value = str(final_path).strip() if final_path is not None else ""
     if final_value:
         report = validate_feed(final_value)
+        report.stats["final_technical_findings"] = [item.to_dict() for item in report.findings]
         report.profile = "oc-transpo-source-and-final-audit"
     else:
         report = ValidationReport(

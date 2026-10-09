@@ -74,6 +74,7 @@ def inspect_archive(path: Path, report: ValidationReport) -> zipfile.ZipFile | N
         )
 
     total_uncompressed = 0
+    unspecified_permissions = []
     for info in infos:
         name = info.filename
         total_uncompressed += info.file_size
@@ -140,7 +141,9 @@ def inspect_archive(path: Path, report: ValidationReport) -> zipfile.ZipFile | N
                 f"Stored Unix mode is {stored_mode:o}.",
                 file=name,
             )
-        if not info.is_dir() and permissions != 0o644:
+        if not info.is_dir() and info.create_system != 3 and stored_mode == 0:
+            unspecified_permissions.append(name)
+        elif not info.is_dir() and permissions & 0o444 != 0o444:
             report.add(
                 "PKG009",
                 "blocker",
@@ -149,7 +152,7 @@ def inspect_archive(path: Path, report: ValidationReport) -> zipfile.ZipFile | N
                 f"Stored permissions are {permissions:03o}; downstream extraction may make the file unreadable.",
                 file=name,
                 observed=f"{permissions:03o}",
-                expected="644",
+                expected="readable by owner, group and others (0644 recommended)",
             )
 
         report.files[name] = {
@@ -159,6 +162,10 @@ def inspect_archive(path: Path, report: ValidationReport) -> zipfile.ZipFile | N
             "stored_mode": f"{permissions:03o}",
         }
 
+    if unspecified_permissions:
+        report.add("PKG018", "info", "Packaging", "Unix permissions not specified",
+                   f"{len(unspecified_permissions)} Windows/DOS members have no Unix permission metadata. This does not mean they are locked.",
+                   context={"files": unspecified_permissions})
     if total_uncompressed > MAX_TOTAL_BYTES:
         report.add(
             "PKG010",
@@ -242,7 +249,7 @@ def inspect_archive(path: Path, report: ValidationReport) -> zipfile.ZipFile | N
                         continue
                     mode = stat.S_IMODE(extracted.stat().st_mode)
                     extracted_modes[name] = f"{mode:03o}"
-                    if mode != 0o644:
+                    if mode & 0o444 != 0o444:
                         report.add(
                             "PKG016",
                             "blocker",

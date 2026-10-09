@@ -17,6 +17,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+py -3 -c "import pandas, tzdata" >nul 2>nul
+if errorlevel 1 (
+  echo Installing Python validation dependencies. Internet is needed for this first setup only.
+  py -3 -m pip install -r requirements.txt
+  if errorlevel 1 (
+    pause
+    exit /b 1
+  )
+)
+
 echo Starting the local GTFS Validator...
 py -3 -m gtfs_validator serve --open
 if errorlevel 1 pause
