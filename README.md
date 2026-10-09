@@ -42,7 +42,10 @@ are never edited or unpacked into your project directory.
 With **Save indexes** enabled, all supplied feeds (both sources and the optional
 final) are saved automatically. SHA-256 content fingerprints and a schema version
 prevent reuse for changed feeds. Reopening after restarting reuses the saved
-database; validation still runs afresh. Disabling this option uses temporary
+database. Completed audits are also saved and reused on the same day when all
+feed fingerprints, validation settings, agency reference, engine files and code
+match. **Run fresh validation** overrides reuse. A new day or changed input runs
+fresh validation while still reusing unchanged indexes. Disabling saving uses temporary
 indexes. First-time indexing still takes time.
 
 Windows storage: `%LOCALAPPDATA%\GTFS Merge Auditor\cache`. Override with
@@ -94,6 +97,24 @@ supply an existing local CLI JAR path in the form. The Java process has a 2 GB
 heap cap and 15-minute timeout; large feeds need sufficient RAM and temporary
 disk space. Internet is needed for initial dependency/JAR setup only; all feed
 processing runs locally.
+
+### Restricted Windows PCs: use Eclipse's existing Java
+
+If your agency allows its Eclipse runtime to run outside the IDE, no Java
+installation or system PATH edit is needed:
+
+1. Double-click `configure_java.bat` once.
+2. Paste the Eclipse folder containing `eclipse.exe` (not the plugins folder).
+   The script reads `eclipse.ini`, locates the runtime and verifies Java 17+.
+   A full `java.exe` path or JDK folder also works.
+3. Double-click `setup_mobilitydata.bat` once to download the CLI JAR.
+4. From then on, double-click `start_windows.bat` normally.
+
+The selection is saved in `%LOCALAPPDATA%\GTFS Merge Auditor\settings.json`,
+outside the repository. Both MobilityData setup and validation read this setting
+directly, even in a newly opened command window. No global environment settings
+are modified. If Eclipse moves or removes that runtime, rerun configuration.
+An already-downloaded CLI JAR is reused by setup without another download.
 
 ## Command line
 
@@ -186,4 +207,5 @@ The next comparison layers are calendar expansion on actual operating dates, dup
 - Audit inputs are local paths. The advanced viewer opens a user-selected ZIP
   directly in browser memory; neither mode sends feed data off the workstation.
 - ZIP paths are screened before any system extraction test.
-- The application has no third-party Python dependencies.
+- Technical/source checks use Python's standard library; the agency profile uses
+  pandas and tzdata. MobilityData uses a local Java runtime and CLI JAR.

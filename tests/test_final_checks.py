@@ -119,7 +119,7 @@ class FinalChecksTests(unittest.TestCase):
             self.assertGreater(len(job.report['findings']),len(expected))
 
     def test_missing_mobility_dependency_is_not_a_pass(self):
-        with patch('gtfs_validator.final_checks.shutil.which', return_value=None):
+        with patch('gtfs_validator.final_checks.find_java', return_value=None):
             result, folder = mobility_checks('unused.zip', '2026-10-09')
         self.assertEqual('unavailable', result['status'])
         self.assertIsNone(folder)
@@ -133,7 +133,7 @@ class FinalChecksTests(unittest.TestCase):
                 result = {'notices':[{'code':'<script>','severity':'ERROR','totalNotices':500,'sampleNotices':[{'filename':'stops.txt','csvRowNumber':3}]}]}
                 (output/'report.json').write_text(json.dumps(result),encoding='utf-8')
                 return subprocess.CompletedProcess(command,0,stdout='success')
-            with patch('gtfs_validator.final_checks.shutil.which',return_value='java'), patch('gtfs_validator.final_checks.subprocess.run',side_effect=run) as process:
+            with patch('gtfs_validator.final_checks.find_java',return_value='java'), patch('gtfs_validator.final_checks.subprocess.run',side_effect=run) as process:
                 result,folder = mobility_checks(str(Path(directory)/'feed.zip'),'2026-10-09',str(jar))
             self.assertEqual(500,result['counts']['ERROR'])
             self.assertIn('--skip_validator_update',process.call_args.args[0])

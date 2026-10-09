@@ -3,9 +3,22 @@ import json
 import urllib.request
 from pathlib import Path
 from .final_checks import DEFAULT_JAR
+from .java_runtime import find_java
 
 
 def main():
+    try:
+        java = find_java()
+    except ValueError as exc:
+        print(exc)
+        raise SystemExit(1)
+    if not java:
+        print('Java not found. Run configure_java.bat once and select your Eclipse folder.')
+        raise SystemExit(1)
+    print(f'Using Java: {java}')
+    if DEFAULT_JAR.is_file():
+        print(f'MobilityData is already installed: {DEFAULT_JAR}')
+        return
     request = urllib.request.Request("https://api.github.com/repos/MobilityData/gtfs-validator/releases/latest", headers={"User-Agent": "GTFS-Merge-Auditor-setup"})
     with urllib.request.urlopen(request, timeout=60) as response:
         release = json.load(response)

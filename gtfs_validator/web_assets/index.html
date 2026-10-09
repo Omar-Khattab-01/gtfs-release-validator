@@ -44,6 +44,7 @@
         </div>
         <fieldset class="validation-options"><legend>Local validation and saved indexes</legend>
           <label><input type="checkbox" id="save-indexes" checked> Save indexes for reuse after restarting (up to 10 GB, 30 days)</label>
+          <label><input type="checkbox" id="force-revalidate"> Run fresh validation even if identical results were saved today</label>
           <label><input type="checkbox" id="run-agency" checked> Run my agency checks on the final GTFS</label>
           <label><input type="checkbox" id="run-mobility" checked> Run MobilityData locally on the final GTFS (Java 17+ and CLI JAR required)</label>
           <label><input type="checkbox" id="release-policy" checked> Enforce Friday release / one-month coverage policy</label>
@@ -65,7 +66,7 @@
     <section id="results" class="hidden">
       <div class="decision-strip" id="decision-strip">
         <div><p class="eyebrow">Release decision</p><h2 id="decision">—</h2></div>
-        <div class="run-meta"><span id="source-name"></span><code id="hash"></code></div>
+        <div class="run-meta"><span id="source-name"></span><code id="hash"></code><span id="run-cache-status"></span></div>
       </div>
 
       <div class="metric-grid" id="metrics"></div>
@@ -166,7 +167,7 @@
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
-  <footer><span>GTFS Merge Auditor 0.9.0</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.9.1</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

@@ -23,6 +23,7 @@ from .engine import validate_feed
 from . import viewer
 from .feed_index import get_index, clear_indexes, cache_info
 from .final_checks import agency_checks, mobility_checks, offline_mobility_report
+from . import audit_cache
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -39,6 +40,8 @@ class Job:
     status: str = "queued"
     progress: str = "Waiting to start"
     save_indexes: bool = False
+    force_revalidate: bool = False
+    audit_cache_status: str = "Session only"
     run_agency: bool = False
     run_mobility: bool = False
     release_policy: bool = True
@@ -67,6 +70,7 @@ class Job:
                 "error": self.error,
                 "final_validation": self.final_validation,
                 "index_status": self.index_status,
+                "audit_cache_status": self.audit_cache_status,
             }
             if self.report is not None:
                 payload["report"] = self.report
@@ -82,21 +86,40 @@ def _run_job(job: Job) -> None:
         job.status = "running"
         job.progress = "Validating ZIPs and comparing exports"
     try:
-        report = validate_merge(job.clevercad_path, job.hastus_path, job.final_path) if job.clevercad_path and job.hastus_path else validate_feed(job.final_path)
-        if not job.clevercad_path and not job.hastus_path:
-            report.stats["inputs"] = {"Final merged GTFS": {"path": job.final_path, "sha256": report.sha256}}
         index_errors = []
         for label, path in (("CleverCAD", job.clevercad_path), ("HASTUS", job.hastus_path), ("Final GTFS", job.final_path)):
             if not path:
                 continue
             with job.lock:
-                job.progress = f"Preparing fast browsing: {label} (one-time local indexing)"
+                job.progress = f"Checking saved index / preparing browsing: {label}"
             try:
                 index = get_index(path, persist=job.save_indexes)
                 job.index_status.append({"source": label, "status": index.cache_status, "warning": index.cache_warning})
             except (OSError, KeyError, ValueError, UnicodeError, csv.Error, zipfile.BadZipFile, RuntimeError, sqlite3.Error) as exc:
                 # A malformed feed must still display its validation findings.
                 index_errors.append(f"{label}: {exc}")
+        cache_identity = None
+        if job.save_indexes:
+            with job.lock:
+                job.progress = "Verifying input fingerprints for saved validation results"
+            try:
+                cache_identity = audit_cache.identity(job)
+                saved = None if job.force_revalidate or index_errors else audit_cache.load(cache_identity)
+                if saved:
+                    with job.lock:
+                        job.report = saved['report']
+                        job.final_validation = saved.get('final_validation')
+                        job.audit_cache_status = 'Reused saved audit: unchanged inputs/settings, same validation day.'
+                        job.status, job.progress = 'complete', 'Ready — reused saved indexes and audit'
+                    return
+                job.audit_cache_status = 'Running fresh checks (no matching saved audit, or fresh checks requested).'
+            except (OSError,ValueError) as exc:
+                job.audit_cache_status = f'Saved audit unavailable: {exc}'
+        with job.lock:
+            job.progress = "Validating ZIPs and comparing exports"
+        report = validate_merge(job.clevercad_path, job.hastus_path, job.final_path) if job.clevercad_path and job.hastus_path else validate_feed(job.final_path)
+        if not job.clevercad_path and not job.hastus_path:
+            report.stats["inputs"] = {"Final merged GTFS": {"path": job.final_path, "sha256": report.sha256}}
         if index_errors:
             report.stats["browse_index_errors"] = index_errors
         if job.final_path:
@@ -129,6 +152,12 @@ def _run_job(job: Job) -> None:
             report.finish()
         with job.lock:
             job.report = report.to_dict()
+        if cache_identity and not index_errors:
+            try:
+                job.audit_cache_status = audit_cache.save(cache_identity,job)
+            except (OSError,ValueError) as exc:
+                job.audit_cache_status = f'Could not save completed audit: {exc}'
+        with job.lock:
             job.status = "complete"
             job.progress = "Ready"
     except Exception as exc:  # Last-resort isolation for the web worker.
@@ -143,7 +172,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.9.0"
+    server_version = "GTFSValidator/0.9.1"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -357,6 +386,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             hastus_path=hastus_path,
             final_path=final_path,
             save_indexes=payload.get("save_indexes") is True,
+            force_revalidate=payload.get("force_revalidate") is True,
             run_agency=payload.get("run_agency") is True,
             run_mobility=payload.get("run_mobility") is True,
             validation_date=validation_date,

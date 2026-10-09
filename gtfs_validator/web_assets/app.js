@@ -148,7 +148,7 @@ async function refreshCache(clear = false) {
     const response = await fetch(clear ? '/api/cache/clear' : '/api/cache', clear ? {method:'POST', headers:{'Content-Type':'application/json','X-GTFS-Validator':'1'}, body:'{}'} : {});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Cache unavailable');
-    document.querySelector('#cache-summary').textContent = `${data.entries.length} saved indexes · ${formatBytes(data.bytes)} · ${data.directory}${data.cleanup ? ` · Removed ${data.cleanup.removed.length}; ${data.cleanup.skipped.length} active/protected indexes retained` : ''}`;
+    document.querySelector('#cache-summary').textContent = `${data.entries.filter(item => item.name.startsWith('index-')).length} saved indexes · ${data.entries.filter(item => item.name.startsWith('audit-')).length} saved audits · ${formatBytes(data.bytes)} · ${data.directory}${data.cleanup ? ` · Removed ${data.cleanup.removed.length}; ${data.cleanup.skipped.length} active/protected indexes retained` : ''}`;
   } catch (error) { document.querySelector('#cache-summary').textContent = error.message; }
 }
 document.querySelector('#cache-refresh').addEventListener('click', () => refreshCache());
@@ -156,7 +156,7 @@ document.querySelector('#cache-clear').addEventListener('click', () => { if (con
 refreshCache();
 
 function renderFinalValidation(payload) {
-  document.querySelector('#index-summary').textContent = (payload.index_status || []).map(item => `${item.source}: ${item.status}${item.warning ? ' — '+item.warning : ''}`).join(' · ');
+  document.querySelector('#index-summary').textContent = (payload.index_status || []).map(item => `${item.source}: ${item.status}${item.warning ? ' — '+item.warning : ''}`).join(' · ') + ' · ' + (payload.audit_cache_status || '');
   const target = document.querySelector('#final-content');
   const validation = payload.final_validation;
   if (!validation) { target.textContent = 'No final merged GTFS supplied. Source comparison is available in the other tabs.'; return; }
@@ -212,6 +212,7 @@ form.addEventListener('submit', async (event) => {
         hastus_path: hastusInput.value.trim(),
         final_path: finalInput.value.trim(),
         save_indexes: document.querySelector('#save-indexes').checked,
+        force_revalidate: document.querySelector('#force-revalidate').checked,
         run_agency: document.querySelector('#run-agency').checked,
         run_mobility: document.querySelector('#run-mobility').checked,
         release_policy: document.querySelector('#release-policy').checked,
@@ -239,6 +240,7 @@ async function poll(id) {
     if (payload.status === 'complete') {
       runningPanel.classList.add('hidden');
       renderReport(payload.report, id);
+      document.querySelector('#run-cache-status').textContent = payload.audit_cache_status || '';
       renderFinalValidation(payload);
       refreshCache();
       return;

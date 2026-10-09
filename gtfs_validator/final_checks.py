@@ -4,12 +4,12 @@ import importlib.util
 import html
 import json
 import re
-import shutil
 import subprocess
 import tempfile
 from datetime import date
 from pathlib import Path
 from .feed_index import get_index
+from .java_runtime import find_java
 
 PACKAGE = Path(__file__).resolve().parent
 DEFAULT_JAR = PACKAGE.parent / ".local-tools" / "gtfs-validator-cli.jar"
@@ -114,10 +114,13 @@ def agency_checks(path: str, validation_date: str, release_policy: bool = True, 
 
 
 def mobility_checks(path: str, validation_date: str, jar: str = "") -> tuple[dict, tempfile.TemporaryDirectory | None]:
-    java = shutil.which("java")
+    try:
+        java = find_java()
+    except ValueError as exc:
+        return {"status": "unavailable", "message": str(exc)}, None
     jar_path = Path(jar) if jar else DEFAULT_JAR
     if not java or not jar_path.is_file():
-        return {"status": "unavailable", "message": "Java 17+ and a local MobilityData CLI JAR are required. Run setup_mobilitydata.bat, or supply the JAR path."}, None
+        return {"status": "unavailable", "message": "Java 17+ and a local MobilityData CLI JAR are required. Run configure_java.bat to remember your Eclipse runtime, then setup_mobilitydata.bat once."}, None
     folder = tempfile.TemporaryDirectory(prefix="gtfs-mobility-report-")
     try:
         # No URL input and no update check: never upload the feed or contact the website.
