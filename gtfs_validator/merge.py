@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 
 from .engine import validate_feed
 from .models import ValidationReport
+from .sequence_diff import mismatch_positions
 
 
 SOURCE_REQUIRED = {"stops.txt", "routes.txt", "trips.txt", "stop_times.txt"}
@@ -491,6 +492,7 @@ def _pair_route_variations(
                 "hastus_variation_id": hastus_id,
                 "similarity_percent": round(score * 100, 1),
                 "difference_count": difference_count,
+                "mismatch_positions": mismatch_positions(first_sequence, second_sequence),
                 "linked_journeys": linked_journeys,
                 "reason": "multiple similarly strong candidates" if ambiguous else evidence,
             }
@@ -662,6 +664,7 @@ def _audit_trip_patterns(
             expected=f"HASTUS {hastus_example.trip_id}: {hastus_example.stop_count} stops",
             context={
                 "clevercad_trip_id": cad_example.trip_id,
+                "mismatch_positions": mismatch_positions(cad_example.stop_sequence, hastus_example.stop_sequence),
                 "hastus_trip_id": hastus_example.trip_id,
                 "route_short_name": cad_example.route_short_name,
                 "direction_id": cad_example.direction_id,
@@ -740,6 +743,7 @@ def _audit_trip_patterns(
                     "similarity_percent": pair["similarity_percent"],
                     "difference_count": pair["difference_count"],
                     "pairing_reason": pair["reason"],
+                    "mismatch_positions": pair.get("mismatch_positions", []),
                 },
             )
         comparable_cad_ids = {str(item["clevercad_variation_id"]) for item in paired}

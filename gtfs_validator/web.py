@@ -24,6 +24,7 @@ from . import viewer
 from .feed_index import get_index, clear_indexes, cache_info
 from .final_checks import agency_checks, mobility_checks, offline_mobility_report
 from . import audit_cache
+from .input_paths import normalize_path
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -172,7 +173,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.9.1"
+    server_version = "GTFSValidator/0.9.2"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -374,9 +375,9 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             date.fromisoformat(validation_date)
         except ValueError:
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Validation date must use YYYY-MM-DD"})
-        clevercad_path = str(payload.get("clevercad_path", "")).strip()
-        hastus_path = str(payload.get("hastus_path", "")).strip()
-        final_path = str(payload.get("final_path", "")).strip()
+        clevercad_path = normalize_path(payload.get("clevercad_path", ""))
+        hastus_path = normalize_path(payload.get("hastus_path", ""))
+        final_path = normalize_path(payload.get("final_path", ""))
         if bool(clevercad_path) != bool(hastus_path) or (not clevercad_path and not final_path):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Supply both sources, or only a final GTFS ZIP to validate and inspect it"})
 
@@ -391,8 +392,8 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             run_mobility=payload.get("run_mobility") is True,
             validation_date=validation_date,
             release_policy=payload.get("release_policy", True) is True,
-            mobility_jar=str(payload.get("mobility_jar", "")).strip(),
-            sort_reference=str(payload.get("sort_reference", "")).strip(),
+            mobility_jar=normalize_path(payload.get("mobility_jar", "")),
+            sort_reference=normalize_path(payload.get("sort_reference", "")),
         )
         with JOBS_LOCK:
             JOBS[job.id] = job

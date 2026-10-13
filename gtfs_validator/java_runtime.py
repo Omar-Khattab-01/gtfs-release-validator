@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from .cache_store import cache_root
+from .input_paths import normalize_path
 
 
 def settings_path() -> Path:
@@ -28,7 +29,7 @@ def find_java() -> str | None:
 
 
 def select_java(location: str) -> tuple[Path, str]:
-    root = Path(location.strip().strip('"')).expanduser().resolve()
+    root = Path(normalize_path(location)).expanduser().resolve()
     candidates = [root] if root.is_file() else [root / 'bin' / 'java.exe', root / 'java.exe']
     if root.is_dir():
         ini = root / 'eclipse.ini'

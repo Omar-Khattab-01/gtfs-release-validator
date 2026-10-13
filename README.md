@@ -78,6 +78,22 @@ No feed is uploaded to MobilityData.
 
 ## Windows setup and launch
 
+Pasted file paths can include surrounding double quotes, single quotes, or
+typographic quotation marks (for example Explorer's **Copy as path**). The app
+removes only matching outer quotes, preserving spaces and apostrophes inside
+filenames. This applies to feed ZIPs, the optional JAR/reference CSV and Java
+configuration.
+
+The **Source stop-sequence mismatch** filter is available in Route health and
+the Investigation centre. Choose any sequence mismatch, beginning, middle or
+end. It filters routes, paired variations, findings and their aligned evidence.
+Beginning/end refer to leading/trailing differing blocks; middle changes occur
+between matched stops. Insertions do not make all later rows mismatches.
+Multiple differing sections can put one variation in several filters.
+Source-only patterns, schedule differences and stop-attribute differences are
+not classified by this source-pattern filter. Clear it to inspect matching
+variations and other findings again.
+
 Requirements: Windows 10/11 and Python 3.10 or newer from <https://www.python.org/downloads/windows/>. During Python installation, enable **Add Python to PATH** and install the Python launcher.
 
 Double-click:

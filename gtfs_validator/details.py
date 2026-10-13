@@ -4,6 +4,7 @@ import difflib
 import math
 from typing import Any
 from .feed_index import get_index
+from .sequence_diff import change_positions
 
 
 def _rows(path: str, file_name: str) -> list[dict[str, str]]:
@@ -86,14 +87,16 @@ def _align_sequences(sides: list[dict[str, Any]], compare_schedule: bool = False
     )
     alignment: list[dict[str, Any]] = []
     schedule_fields = ("arrival_time", "departure_time", "pickup_type", "drop_off_type")
+    positions = []
 
     def append(first: dict[str, Any] | None, second: dict[str, Any] | None, status: str) -> None:
         fields = [field for field in schedule_fields if compare_schedule and first and second and first.get(field) != second.get(field)]
         if status == "match" and compare_schedule and fields:
             status = "schedule_difference"
-        alignment.append({"clevercad": first, "hastus": second, "status": status, "fields": fields})
+        alignment.append({"clevercad": first, "hastus": second, "status": status, "fields": fields, "mismatch_positions": positions})
 
     for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+        positions = [] if tag == 'equal' else change_positions(left_start,left_end,right_start,right_end,len(left),len(right))
         if tag == "equal":
             for offset in range(left_end - left_start):
                 append(left[left_start + offset], right[right_start + offset], "match")

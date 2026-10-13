@@ -96,6 +96,8 @@
           <div class="route-heading-actions"><span class="quiet" id="route-summary">Select a route to isolate its trip findings</span><label>Sort routes<select id="route-sort"><option value="number">Route number</option><option value="attention">Needs attention</option><option value="variations">Most variations</option></select></label></div>
         </div>
         <div class="route-legend"><span><i class="route-dot healthy"></i>All paired patterns match</span><span><i class="route-dot issues"></i>Pattern mismatches found</span><span><i class="route-dot ambiguous"></i>Pairing needs review</span><span><i class="route-dot not-comparable"></i>Source-only</span></div>
+        <label>Source stop-sequence mismatch<select id="route-sequence-filter"><option value="">All routes and variations</option><option value="any">Any stop-sequence mismatch</option><option value="first">First stop / beginning</option><option value="middle">Middle stops</option><option value="last">Last stop / end</option></select></label>
+        <p class="quiet">Filters compare paired CleverCAD ↔ HASTUS stop patterns, not times or stop attributes. Beginning/end changes are identified against matched stops; a variation can appear in multiple filters. Source-only patterns are not classified as mismatches.</p>
         <div class="route-grid" id="route-grid"></div>
         <div class="active-route hidden" id="active-route"><span id="active-route-label"></span><button type="button" class="text-button" id="clear-route">Show all routes</button></div>
         <section class="variation-panel hidden" id="variation-panel" aria-labelledby="variation-title">
@@ -133,6 +135,7 @@
           <label class="search"><span>Search</span><input id="search" type="search" placeholder="Rule, file, trip, message…"></label>
           <label><span>Severity</span><select id="severity-filter"><option value="">All severities</option><option>blocker</option><option>error</option><option>warning</option><option>info</option></select></label>
           <label><span>Category</span><select id="category-filter"><option value="">All categories</option></select></label>
+          <label><span>Source stop-sequence mismatch</span><select id="sequence-filter"><option value="">All findings</option><option value="any">Any stop-sequence mismatch</option><option value="first">First stop / beginning</option><option value="middle">Middle stops</option><option value="last">Last stop / end</option></select></label>
           <span class="result-count" id="result-count"></span>
         </div>
         <div class="selection-bar">
@@ -167,7 +170,7 @@
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
-  <footer><span>GTFS Merge Auditor 0.9.1</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.9.2</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>
