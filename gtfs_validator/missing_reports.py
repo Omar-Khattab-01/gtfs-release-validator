@@ -11,9 +11,6 @@ from xml.sax.saxutils import escape as xml_escape
 from .feed_index import get_index
 from .viewer import trip_detail
 
-DISCLAIMER = 'Missing stops are source-only occurrences in a paired stop sequence, not proof the stop is absent from the entire feed. Unpaired patterns are listed separately as review findings, not confirmed missing service.'
-
-
 def missing_report(report, missing, search=''):
     if missing not in {'cad','hastus'}:
         raise ValueError('Missing source must be cad or hastus')
@@ -42,7 +39,7 @@ def missing_report(report, missing, search=''):
                            'hastus_variation_count':route.get('hastus_variation_count',0)})
     routes.sort(key=lambda item: [int(part) if part.isdigit() else part.casefold() for part in re.split(r'(\d+)',str(item['route_short_name']))])
     return {'missing':missing,'present':'hastus' if missing=='cad' else 'cad','title':'Missing in '+('CAD' if missing=='cad' else 'HASTUS'),
-            'disclaimer':DISCLAIMER,'routes':routes,'route_count':len(routes),
+            'routes':routes,'route_count':len(routes),
             'variation_count':sum(len(route['variations']) for route in routes),
             'missing_stop_count':sum(len(item['missing_stops']) for route in routes for item in route['variations']),
             'unpaired_variation_count':sum(item['issue_kind']=='unpaired_pattern' for route in routes for item in route['variations']),
@@ -80,7 +77,7 @@ def variation_evidence(report, paths, missing, route_name, variation_id, trip_id
             'counterpart':counterpart,'comparison':comparison,'counterpart_source':counterpart_source,
             'trips':index.lookup_many('trips.txt',ids,entity=True),
             'stop_times':sorted(index.lookup('stop_times.txt',selected),key=lambda row:int(row.get('stop_sequence') or 0)),
-            'services':services,'disclaimer':DISCLAIMER}
+            'services':services}
 
 
 def _records_table(records):
@@ -95,7 +92,7 @@ def export_excel(report, paths, missing, search=''):
         for entry in route['variations']:
             item=entry['variation'];prefix={'route_number':route['route_short_name'],'variation':item['variation_id']}
             variants.append({**prefix,'missing_source':data['title'],'issue_kind':entry['issue_kind'],'missing_stop_count':len(entry['missing_stops']),'reason':entry['pair'].get('reason',''),**{key:value for key,value in item.items() if key!='trip_ids'}})
-            missing_items.extend({**prefix,'missing_source':data['title'],'counterpart_variation':entry['pair'].get('clevercad_variation_id' if missing=='cad' else 'hastus_variation_id',''),**stop} for stop in entry['missing_stops'])
+            missing_items.extend({**prefix,'missing_source':data['title'],missing+'_variation':entry['pair'].get('clevercad_variation_id' if missing=='cad' else 'hastus_variation_id',''),**stop} for stop in entry['missing_stops'])
             if entry['issue_kind']!='unpaired_pattern':
                 evidence=variation_evidence(report,paths,missing,str(route['route_short_name']),item['variation_id'])
                 for row in evidence['comparison']['alignment']:
@@ -123,7 +120,7 @@ def export_excel(report, paths, missing, search=''):
     shapes=streamed_table(index.columns.get('shapes.txt',[]) if index else [],(row for shape in sorted(shape_ids-{''}) for row in index.lookup('shapes.txt',shape))) if index and 'shapes.txt' in index.columns else [[]]
     services=[{'source_file':name,**row} for name in ('calendar.txt','calendar_dates.txt') if index and name in index.columns
               for row in index.rows(name) if row.get('service_id') in service_ids]
-    metadata=[['Report',data['title']],['Meaning',DISCLAIMER],['Audit completed',data['completed_at'] or ''],['Search filter',search],
+    metadata=[['Report',data['title']],['Audit completed',data['completed_at'] or ''],['Search filter',search],
               ['Affected routes',data['route_count']],['Affected variations',data['variation_count']],['Missing stop occurrences',data['missing_stop_count']],['Unpaired patterns',data['unpaired_variation_count']],['Source trips',data['trip_count']]]
     metadata.extend([[label,json.dumps(value,ensure_ascii=False)] for label,value in data['inputs'].items()])
     sheets=[('Report',metadata),('Variations',_records_table(variants)),('Routes',_records_table(list({row.get('route_id'):row for row in route_rows}.values()))),
@@ -180,7 +177,7 @@ def printable_report(report, paths, missing, search=''):
             missing_positions={stop['position'] for stop in entry['missing_stops']}
             highlight=' style="background:#fff2bb"'
             stops=''.join(f'<tr{highlight if position in missing_positions else ""}><td>{escape(str(stop.get("sequence","")))}</td><td>{escape(stop.get("source_stop_id",""))}</td><td>{escape(stop.get("stop_name",""))}</td><td>{escape(stop.get("arrival_time", ""))}</td><td>{escape(stop.get("departure_time", ""))}</td></tr>' for position,stop in enumerate(detail['stops'],1))
-            issue='Unpaired pattern — review required' if entry['issue_kind']=='unpaired_pattern' else 'Stops missing from paired counterpart'
+            issue='Unpaired pattern' if entry['issue_kind']=='unpaired_pattern' else 'Stops missing in '+('CAD' if missing=='cad' else 'HASTUS')
             missing_list='<ul>'+''.join(f'<li>{escape(stop.get("stop_name") or stop["source_stop_id"])} · {escape(stop["source_stop_id"])} · position {stop["position"]} · {escape(", ".join(stop.get("mismatch_positions",[])))}</li>' for stop in entry['missing_stops'])+'</ul>'
             trip_fields=''.join(f'<dt>{escape(key)}</dt><dd>{escape(str(value))}</dd>' for key,value in detail['trip'].items())
             comparison_html=''
@@ -193,4 +190,4 @@ def printable_report(report, paths, missing, search=''):
     sources=''.join(f'<li>{escape(label)}: {escape(json.dumps(value,ensure_ascii=False))}</li>' for label,value in data['inputs'].items())
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{escape(data['title'])} — GTFS review report</title>
 <style>body{{font:11pt Arial,sans-serif;color:#183446;margin:24px}}h1{{font-size:24pt}}h2{{border-bottom:2px solid #183446;padding-top:16px}}article{{border:1px solid #ccd7df;padding:16px;margin:16px 0}}dl{{display:grid;grid-template-columns:180px 1fr;gap:6px}}dt{{font-weight:bold}}dd{{margin:0;overflow-wrap:anywhere}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ccd7df;text-align:left;padding:6px;overflow-wrap:anywhere}}li{{overflow-wrap:anywhere}}thead{{display:table-header-group}}tr{{break-inside:avoid}}h2,h3,h4{{break-after:avoid}}@media print{{button,.print-help{{display:none}}body{{margin:0}}article{{border:0;padding:0}}}}@page{{size:A4;margin:16mm}}</style>
-<script src="/assets/print-report.js" defer></script></head><body><button id="print-report">Print / save as PDF</button><p class="print-help">Choose Microsoft Print to PDF or Save as PDF in your browser. No upload or Java installation is required.</p><h1>{escape(data['title'])}</h1><p>{escape(DISCLAIMER)}</p><p>{data['route_count']} routes · {data['variation_count']} variations · {data['trip_count']} source trips</p><p>Audit completed: {escape(str(data['completed_at'] or ''))} · Search: {escape(search or 'All')}</p><p>Includes every listed variation and its representative trip sequence. Excel includes all underlying trip and stop-time records.</p>{''.join(sections) or '<p>No unpaired patterns match this report.</p>'}<h2>Source provenance</h2><ul>{sources}</ul></body></html>'''.encode('utf-8')
+<script src="/assets/print-report.js" defer></script></head><body><button id="print-report">Print / save as PDF</button><p class="print-help">Choose Microsoft Print to PDF or Save as PDF in your browser. No upload or Java installation is required.</p><h1>{escape(data['title'])}</h1><p>{data['route_count']} routes · {data['variation_count']} variations · {data['trip_count']} source trips</p><p>Audit completed: {escape(str(data['completed_at'] or ''))} · Search: {escape(search or 'All')}</p><p>Includes every listed variation and its representative trip sequence. Excel includes all underlying trip and stop-time records.</p>{''.join(sections) or '<p>No unpaired patterns match this report.</p>'}<h2>Source provenance</h2><ul>{sources}</ul></body></html>'''.encode('utf-8')

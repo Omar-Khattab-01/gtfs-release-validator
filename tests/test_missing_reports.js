@@ -32,3 +32,12 @@ test('Paired source-only stop rows appear in the correct report and can be searc
   assert.equal(missingRows(paired,'hastus')[0].unpaired,false);
   assert.equal(missingRows(paired,'hastus')[0].missingStops[0].position,2);
 });
+for (const missing of ['HASTUS','CAD']) {
+  test(`Highlighted stops explicitly name ${missing}, with no generic counterpart label`,()=>{
+    const renderer=source.slice(source.indexOf('function missingTripTable'),source.indexOf('async function inspectMissing'));
+    const render=vm.runInNewContext(renderer+'\nmissingTripTable',{escapeHtml:String,sourceCard:()=>''});
+    const html=render({stops:[{sequence:'1',source_stop_id:'A',stop_name:'Station',arrival_time:'08:00:00',departure_time:'08:00:00',source_record:{}}]},[],[{position:1}],missing);
+    assert.ok(html.includes(`Missing in ${missing}`));
+    assert.ok(!html.includes('counterpart'));
+  });
+}

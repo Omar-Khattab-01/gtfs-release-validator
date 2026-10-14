@@ -77,7 +77,8 @@ class MissingReportTests(unittest.TestCase):
         self.assertIn('Route 19',html);self.assertNotIn('Route 20',html)
         self.assertIn('ST-LAURENT D',html);self.assertIn('Representative stop sequence',html)
         self.assertIn('Microsoft Print to PDF',html)
-        self.assertIn('not proof',html)
+        self.assertNotIn('not proof',html)
+        self.assertNotIn('Missing stops are source-only',html)
         escaped=printable_report(self.report,self.paths,'hastus','<script>alert(1)</script>').decode()
         self.assertNotIn('<script>alert(1)</script>',escaped)
         self.assertIn('&lt;script&gt;',escaped)
@@ -104,7 +105,8 @@ class MissingReportTests(unittest.TestCase):
             self.assertIn('ST-LAURENT A',archive.read('xl/worksheets/sheet9.xml').decode())
             self.assertIn('clevercad_only',archive.read('xl/worksheets/sheet10.xml').decode())
         html=printable_report(report,self.paths,'hastus').decode()
-        self.assertIn('Stops missing from paired counterpart',html)
+        self.assertIn('Stops missing in HASTUS',html)
+        self.assertNotIn('paired counterpart',html)
         self.assertIn('Full paired stop comparison',html)
 
     def test_missing_in_cad_direction_and_same_stop_occurrences_not_sets(self):
