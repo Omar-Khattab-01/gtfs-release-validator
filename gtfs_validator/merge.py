@@ -593,6 +593,7 @@ def _audit_trip_patterns(
                         "pattern_fingerprint": fingerprint,
                         "_stop_sequence": trips[0].stop_sequence,
                         "example_trip_id": example.trip_id,
+                        "trip_ids": sorted({trip.trip_id for trip in trips}),
                         "stop_count": trips[0].stop_count,
                         "trip_count": len(trips),
                         "shape_ids": sorted({trip.shape_id for trip in trips if trip.shape_id}),

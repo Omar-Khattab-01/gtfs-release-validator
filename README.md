@@ -38,10 +38,28 @@ mean stop-pattern equivalence, not proof of vendor intent or schedule equality.
 
 Source-only variations open their own stop sequence. The Local feed viewer can
 inspect all their trips and shapes, even when no counterpart exists.
-The **Source presence** filter offers **Missing in CleverCAD** and **Missing in
-HASTUS**, narrowing route cards, variation tabs and related trip findings.
+The **Missing in HASTUS** and **Missing in CAD** tabs group unpaired variations
+by route, with destination, direction, shapes, stops, trip count, time span and
+pairing reason. **View** opens a keyboard-accessible popup with every source
+trip, full route/trip/stop/boarding attributes, calendar exceptions and an
+offline shape map. Closing it restores the same list, search and scroll
+position. Optional final-pattern evidence remains inspectable in the popup.
+
+Each report has its own search and exports the full matching list:
+
+- **Export Excel** downloads a real `.xlsx` workbook with report provenance,
+  variations, routes, every underlying trip and stop-time row, stop attributes,
+  shapes and calendars. Stop-time and shape worksheets stream locally in
+  batches. IDs are stored as text and cannot execute as spreadsheet formulas.
+- **PDF / print report** opens a printable local report. Select **Print / save
+  as PDF**, then **Microsoft Print to PDF** or your browser's **Save as PDF**.
+  It includes every listed variation and its representative trip sequence;
+  Excel provides all underlying trip records. No Java or Office installation
+  is needed to generate either report.
+
 These labels mean no suitable counterpart was paired, not confirmed missing
-service. Stop mapping and the separate rail comparison are unaffected.
+service. Paired mismatches stay in Route variations. Stop mapping and the
+separate rail comparison are unaffected. Original GTFS ZIPs are never edited.
 
 Your [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) is bundled at
 `http://127.0.0.1:8765/file-viewer/`, accessible from the Local feed viewer.

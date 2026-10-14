@@ -27,6 +27,7 @@ from . import audit_cache
 from .input_paths import normalize_path
 from .rail import audit_rail, trip_evidence
 from .models import ValidationReport
+from .missing_reports import missing_report, variation_evidence, export_excel, printable_report
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -189,7 +190,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.10.0"
+    server_version = "GTFSValidator/0.11.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -247,6 +248,29 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown run"})
             if len(parts) == 3:
                 return self._json(HTTPStatus.OK, job.public())
+            if len(parts)==4 and parts[3] in {'missing-report','missing-detail','missing-report.xlsx','missing-report.html'}:
+                payload=job.public()
+                if payload.get('report') is None:return self._json(HTTPStatus.CONFLICT,{'error':'Report is not ready'})
+                query=parse_qs(parsed_url.query)
+                get=lambda key: str((query.get(key) or [''])[0])
+                missing=get('missing');search=get('search')
+                paths={'cad':job.clevercad_path,'hastus':job.hastus_path}
+                try:
+                    key=('missing-report',parts[3],missing,search,get('route'),get('variation'),get('trip'))
+                    with job.lock:content=job.viewer_cache.get(key)
+                    if content is None:
+                        if parts[3]=='missing-report':content=missing_report(payload['report'],missing,search)
+                        elif parts[3]=='missing-detail':content=variation_evidence(payload['report'],paths,missing,get('route'),get('variation'),get('trip'))
+                        elif parts[3]=='missing-report.xlsx':content=export_excel(payload['report'],paths,missing,search)
+                        else:content=printable_report(payload['report'],paths,missing,search)
+                        # Large downloads are generated on demand, not retained in RAM.
+                        if parts[3] in {'missing-report','missing-detail'}:
+                            with job.lock:job.viewer_cache[key]=content
+                    if parts[3]=='missing-report.xlsx':return self._download(content,f'missing-in-{missing}-{job.id}.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                    if parts[3]=='missing-report.html':return self._bytes(HTTPStatus.OK,content,'text/html; charset=utf-8')
+                    return self._json(HTTPStatus.OK,content)
+                except (OSError,ValueError,KeyError,sqlite3.Error,zipfile.BadZipFile) as exc:
+                    return self._json(HTTPStatus.UNPROCESSABLE_ENTITY,{'error':f'Could not build source-only report: {exc}'})
             if len(parts) == 4 and parts[3] == "final-validation.json":
                 return self._download(json.dumps(job.public().get("final_validation"), ensure_ascii=False, indent=2).encode(), "final-validation.json", "application/json")
             if len(parts) == 4 and parts[3] == "mobility-report.html":

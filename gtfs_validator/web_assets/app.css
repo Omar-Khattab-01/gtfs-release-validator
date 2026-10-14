@@ -264,3 +264,15 @@ footer { max-width: 1240px; margin: 0 auto; padding: 22px 28px; display: flex; j
 .validation-file pre, #final-content pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 500px; overflow: auto; }
 .evidence-row { background: #fff2bb; outline: 2px solid #b47600; }
 .evidence-field { background: #ffd578; font-weight: 700; }
+.missing-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.missing-toolbar label { flex: 1; min-width: 220px; }
+.missing-route-group { border: 1px solid #ccd7df; border-radius: 10px; margin: 18px 0; padding: 18px; }
+.missing-route-group h4 { margin: 0; font-size: 20px; }
+.missing-route-group h4 span { font-size: 13px; color: #596875; margin-left: 12px; }
+.missing-empty { padding: 24px; background: #eef4f5; border-radius: 10px; }
+#missing-dialog { width: min(1200px, 94vw); max-height: 92vh; padding: 0; border: 0; border-radius: 12px; color: #183446; }
+#missing-dialog::backdrop { background: rgba(15,30,40,.6); }
+#missing-dialog .drawer-header { position: sticky; top: 0; background: white; z-index: 2; padding: 18px; }
+#missing-dialog-body { padding: 20px; }
+#missing-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow: auto; }
+#missing-dialog .field-list dd { overflow-wrap: anywhere; }

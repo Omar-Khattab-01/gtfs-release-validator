@@ -74,11 +74,23 @@
 
       <nav class="workspace-tabs" aria-label="Audit views">
         <button type="button" class="workspace-tab active" data-view="routes" aria-selected="true">Route variations</button>
+        <button type="button" class="workspace-tab" data-view="missing-hastus" aria-selected="false">Missing in HASTUS</button>
+        <button type="button" class="workspace-tab" data-view="missing-cad" aria-selected="false">Missing in CAD</button>
         <button type="button" class="workspace-tab" data-view="stops" aria-selected="false">Stop mapping &amp; mismatches</button>
         <button type="button" class="workspace-tab" data-view="viewer" aria-selected="false">Local feed viewer</button>
         <button type="button" class="workspace-tab" data-view="final" aria-selected="false">Final GTFS validation</button>
         <button type="button" class="workspace-tab" data-view="rail" aria-selected="false">Rail variations &amp; trips</button>
       </nav>
+      <section class="panel hidden missing-report-view" id="missing-hastus-view" data-missing="hastus">
+        <h3>Missing in HASTUS</h3><p class="quiet">CleverCAD variations without a sufficiently similar paired HASTUS counterpart. Review findings—not confirmed missing service.</p>
+        <div class="missing-toolbar"><label>Find route or variation<input type="search" id="missing-hastus-search" placeholder="Route, destination, shape or variation"></label><a class="button secondary" data-export-missing="hastus" data-format="xlsx" download>Export Excel</a><a class="button secondary" data-export-missing="hastus" data-format="html" target="_blank" rel="noopener">PDF / print report</a></div>
+        <p id="missing-hastus-summary" aria-live="polite"></p><div id="missing-hastus-list"></div>
+      </section>
+      <section class="panel hidden missing-report-view" id="missing-cad-view" data-missing="cad">
+        <h3>Missing in CAD</h3><p class="quiet">HASTUS variations without a sufficiently similar paired CleverCAD counterpart. Review findings—not confirmed missing service.</p>
+        <div class="missing-toolbar"><label>Find route or variation<input type="search" id="missing-cad-search" placeholder="Route, destination, shape or variation"></label><a class="button secondary" data-export-missing="cad" data-format="xlsx" download>Export Excel</a><a class="button secondary" data-export-missing="cad" data-format="html" target="_blank" rel="noopener">PDF / print report</a></div>
+        <p id="missing-cad-summary" aria-live="polite"></p><div id="missing-cad-list"></div>
+      </section>
       <section class="panel hidden" id="final-view"><h3>Final GTFS validation</h3><div id="index-summary"></div><div id="final-content"></div></section>
       <section class="panel hidden" id="rail-view"><h3>HASTUS rail → final GTFS</h3><p id="rail-summary"></p><div id="rail-routes" class="route-grid"></div><div id="rail-content"></div></section>
       <section class="panel hidden" id="viewer-view">
@@ -100,8 +112,8 @@
         </div>
         <div class="route-legend"><span><i class="route-dot healthy"></i>All paired patterns match</span><span><i class="route-dot issues"></i>Pattern mismatches found</span><span><i class="route-dot ambiguous"></i>Pairing needs review</span><span><i class="route-dot not-comparable"></i>Source-only</span></div>
         <label>Source stop-sequence mismatch<select id="route-sequence-filter"><option value="">All routes and variations</option><option value="any">Any stop-sequence mismatch</option><option value="first">First stop / beginning</option><option value="middle">Middle stops</option><option value="last">Last stop / end</option></select></label>
-        <label>Source presence<select id="source-presence-filter"><option value="">All source patterns</option><option value="clevercad">Missing in CleverCAD</option><option value="hastus">Missing in HASTUS</option></select></label>
-        <p class="quiet">Missing means no sufficiently similar counterpart was paired in that source—not proof that the service is absent. This filter narrows route cards, variation tabs and related trip findings; stop mapping and rail remain separate.</p>
+        <select id="source-presence-filter" class="hidden" aria-hidden="true" tabindex="-1"><option value="">All source patterns</option><option value="clevercad">Missing in CleverCAD</option><option value="hastus">Missing in HASTUS</option></select>
+        <p class="quiet">Use the Missing in HASTUS / Missing in CAD tabs for grouped source-only reports and exports.</p>
         <p class="quiet">Filters compare paired CleverCAD ↔ HASTUS stop patterns, not times or stop attributes. Beginning/end changes are identified against matched stops; a variation can appear in multiple filters. Source-only patterns are not classified as mismatches.</p>
         <div class="route-grid" id="route-grid"></div>
         <div class="active-route hidden" id="active-route"><span id="active-route-label"></span><button type="button" class="text-button" id="clear-route">Show all routes</button></div>
@@ -130,7 +142,7 @@
         <div class="load-more-wrap"><button type="button" class="button secondary hidden" id="stop-mapping-more">Show more stops</button></div>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="investigation-panel">
         <div class="section-heading">
           <div><span class="step">03</span><h3>Investigation centre</h3></div>
           <div class="actions"><a id="csv-link" class="button secondary">Export CSV</a><a id="json-link" class="button secondary">Export JSON</a></div>
@@ -175,7 +187,12 @@
       <div class="drawer-body" id="drawer-body"></div>
     </aside>
   </div>
-  <footer><span>GTFS Merge Auditor 0.10.0</span><span>Bound to localhost · no network services</span></footer>
+  <dialog id="missing-dialog" aria-labelledby="missing-dialog-title">
+    <div class="drawer-header"><div><p class="eyebrow">Source-only variation evidence</p><h2 id="missing-dialog-title">Variation details</h2></div><button type="button" id="missing-dialog-close" aria-label="Close variation and return to report">×</button></div>
+    <div id="missing-dialog-body"></div>
+  </dialog>
+  <footer><span>GTFS Merge Auditor 0.11.0</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
+  <script src="/assets/missing-reports.js" defer></script>
 </body>
 </html>

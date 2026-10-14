@@ -297,6 +297,7 @@ function renderReport(report, id) {
   const categories = [...new Set(activeFindings.map(f => f.category))].sort();
   categoryFilter.innerHTML = '<option value="">All categories</option>' + categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
   renderRouteHealth(report.stats?.trip_reconciliation?.route_health || []);
+  renderMissingReports();
   renderStopMapping(report.stats?.stop_crosswalk || {});
   renderRail(report.stats?.rail);
   renderIssueGroups();
@@ -824,6 +825,8 @@ document.querySelectorAll('.workspace-tab').forEach(tab => tab.addEventListener(
   document.querySelector('#viewer-view').classList.toggle('hidden', tab.dataset.view !== 'viewer');
   document.querySelector('#final-view').classList.toggle('hidden', tab.dataset.view !== 'final');
   document.querySelector('#rail-view').classList.toggle('hidden', tab.dataset.view !== 'rail');
+  for (const missing of ['cad','hastus']) document.querySelector(`#missing-${missing}-view`).classList.toggle('hidden', tab.dataset.view !== `missing-${missing}`);
+  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view.startsWith('missing-'));
 }));
 stopMappingSearch.addEventListener('input', () => { stopMappingLimit = 80; renderStopMappingRows(); });
 stopMappingFilter.addEventListener('change', () => { stopMappingLimit = 80; renderStopMappingRows(); });

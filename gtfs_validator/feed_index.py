@@ -125,15 +125,16 @@ class FeedIndex:
         rows = self._query("SELECT data FROM records WHERE name=? AND row_number>=? ORDER BY row_number LIMIT ?", (name, offset, limit + 1))
         return {"columns": self.columns[name], "rows": rows[:limit], "offset": offset, "has_more": len(rows) > limit}
 
-    def lookup_many(self, name: str, keys: list[str]) -> list[dict]:
+    def lookup_many(self, name: str, keys: list[str], *, entity: bool = False) -> list[dict]:
         if name not in self.columns:
             raise KeyError(name)
         result = []
+        column = 'entity' if entity else 'parent'
         with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:
             for start in range(0, len(keys), 400):
                 chunk = keys[start:start + 400]
                 placeholders = ",".join("?" for _ in chunk)
-                sql = f"SELECT data FROM records INDEXED BY records_parent WHERE name=? AND parent IN ({placeholders}) AND parent != '' ORDER BY row_number"
+                sql = f"SELECT data FROM records INDEXED BY records_{column} WHERE name=? AND {column} IN ({placeholders}) AND {column} != '' ORDER BY row_number"
                 result.extend(json.loads(row[0]) for row in db.execute(sql, (name, *chunk)))
         return result
 
