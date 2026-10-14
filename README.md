@@ -38,12 +38,18 @@ mean stop-pattern equivalence, not proof of vendor intent or schedule equality.
 
 Source-only variations open their own stop sequence. The Local feed viewer can
 inspect all their trips and shapes, even when no counterpart exists.
-The **Missing in HASTUS** and **Missing in CAD** tabs group unpaired variations
-by route, with destination, direction, shapes, stops, trip count, time span and
-pairing reason. **View** opens a keyboard-accessible popup with every source
+The **Missing in HASTUS** tab includes stops labelled **Only in CleverCAD** in
+paired stop comparisons; **Missing in CAD** includes **Only in HASTUS**.
+Reports group affected variations by route and list the missing stop names,
+IDs and beginning/middle/end positions, with direction, shapes and trip counts.
+This is occurrence-level absence from the paired stop sequence, not necessarily
+absence from `stops.txt`. Unpaired patterns are separately labelled for review.
+Stop replacements and time/attribute changes are not silently classified as
+missing in both exports. **View** opens a keyboard-accessible popup with every source
 trip, full route/trip/stop/boarding attributes, calendar exceptions and an
 offline shape map. Closing it restores the same list, search and scroll
-position. Optional final-pattern evidence remains inspectable in the popup.
+position. Full CAD/HASTUS sequences remain visible with missing stops highlighted.
+Optional final-pattern evidence remains inspectable in the popup.
 
 Each report has its own search and exports the full matching list:
 
@@ -57,8 +63,8 @@ Each report has its own search and exports the full matching list:
   Excel provides all underlying trip records. No Java or Office installation
   is needed to generate either report.
 
-These labels mean no suitable counterpart was paired, not confirmed missing
-service. Paired mismatches stay in Route variations. Stop mapping and the
+Unpaired patterns mean no suitable counterpart was found, not confirmed missing
+service. Other paired mismatches stay in Route variations. Stop mapping and the
 separate rail comparison are unaffected. Original GTFS ZIPs are never edited.
 
 Your [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) is bundled at

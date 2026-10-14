@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape as xml_escape
 from .feed_index import get_index
 from .viewer import trip_detail
 
-DISCLAIMER = 'No sufficiently similar counterpart was paired. This is a review finding, not proof that service is absent.'
+DISCLAIMER = 'Missing stops are source-only occurrences in a paired stop sequence, not proof the stop is absent from the entire feed. Unpaired patterns are listed separately as review findings, not confirmed missing service.'
 
 
 def missing_report(report, missing, search=''):
@@ -24,12 +24,15 @@ def missing_report(report, missing, search=''):
         catalog = {item['variation_id']:item for item in route.get(present+'_variations',[])}
         variations = []
         for pair in route.get('variation_pairs',[]):
-            if pair.get('status')!='not_comparable' or pair.get(absent+'_variation_id') or not pair.get(present+'_variation_id'):
+            unpaired=pair.get('status')=='not_comparable' and not pair.get(absent+'_variation_id') and bool(pair.get(present+'_variation_id'))
+            missing_stops=pair.get('only_in_'+present,[]) if pair.get(absent+'_variation_id') else []
+            if not unpaired and not missing_stops:
                 continue
             item = catalog.get(pair[present+'_variation_id'])
             if item:
-                entry = {'pair':pair,'variation':item}
-                searchable=[route.get('route_short_name'),item.get('variation_id'),item.get('headsigns'),item.get('shape_ids'),item.get('direction_ids'),item.get('first_time'),item.get('last_time'),item.get('trip_ids'),pair.get('reason')]
+                entry = {'pair':pair,'variation':item,'missing_stops':missing_stops,
+                         'issue_kind':'unpaired_pattern' if unpaired else 'missing_stops_in_paired_variation'}
+                searchable=[route.get('route_short_name'),item.get('variation_id'),item.get('headsigns'),item.get('shape_ids'),item.get('direction_ids'),item.get('first_time'),item.get('last_time'),item.get('trip_ids'),pair.get('reason'),missing_stops]
                 if search.casefold() in json.dumps(searchable,ensure_ascii=False).casefold():
                     variations.append(entry)
         if variations:
@@ -41,6 +44,8 @@ def missing_report(report, missing, search=''):
     return {'missing':missing,'present':'hastus' if missing=='cad' else 'cad','title':'Missing in '+('CAD' if missing=='cad' else 'HASTUS'),
             'disclaimer':DISCLAIMER,'routes':routes,'route_count':len(routes),
             'variation_count':sum(len(route['variations']) for route in routes),
+            'missing_stop_count':sum(len(item['missing_stops']) for route in routes for item in route['variations']),
+            'unpaired_variation_count':sum(item['issue_kind']=='unpaired_pattern' for route in routes for item in route['variations']),
             'trip_count':sum(item['variation']['trip_count'] for route in routes for item in route['variations']),
             'search':search,'completed_at':report.get('completed_at'),'inputs':report.get('stats',{}).get('inputs',{})}
 
@@ -49,7 +54,7 @@ def variation_evidence(report, paths, missing, route_name, variation_id, trip_id
     data = missing_report(report,missing)
     entry = next((entry for route in data['routes'] if str(route['route_short_name'])==route_name
                   for entry in route['variations'] if entry['variation']['variation_id']==variation_id),None)
-    if entry is None:raise ValueError('Source-only variation not found in this report')
+    if entry is None:raise ValueError('Variation has no missing-source issue in this report')
     variation=entry['variation'];ids=variation.get('trip_ids') or [variation['example_trip_id']]
     selected=trip_id or variation['example_trip_id']
     if selected not in ids:raise ValueError('Trip does not belong to this variation')
@@ -58,7 +63,21 @@ def variation_evidence(report, paths, missing, route_name, variation_id, trip_id
     route=[row for row in index.small_tables.get('routes.txt',[]) if row.get('route_id')==detail['trip'].get('route_id')]
     services={name:[row for row in index.rows(name) if row.get('service_id')==detail['trip'].get('service_id')]
               for name in ('calendar.txt','calendar_dates.txt') if name in index.columns}
+    counterpart_key='hastus_variation_id' if data['present']=='cad' else 'clevercad_variation_id'
+    counterpart_source='hastus' if data['present']=='cad' else 'cad'
+    counterpart_id=entry['pair'].get(counterpart_key)
+    counterpart=None;comparison=None
+    if counterpart_id:
+        health=next(row for row in report['stats']['trip_reconciliation']['route_health'] if str(row['route_short_name'])==route_name)
+        catalog=health['hastus_variations' if counterpart_source=='hastus' else 'clevercad_variations']
+        other=next(item for item in catalog if item['variation_id']==counterpart_id)
+        counterpart=trip_detail(paths[counterpart_source],other['example_trip_id'])
+        from .details import build_detail
+        context={'clevercad_trip_id':selected if data['present']=='cad' else other['example_trip_id'],
+                 'hastus_trip_id':selected if data['present']=='hastus' else other['example_trip_id']}
+        comparison=build_detail({'rule_id':'TRP103','context':context},paths['cad'],paths['hastus'])
     return {'summary':entry,'source':data['present'],'route':route[0] if route else {},'detail':detail,
+            'counterpart':counterpart,'comparison':comparison,'counterpart_source':counterpart_source,
             'trips':index.lookup_many('trips.txt',ids,entity=True),
             'stop_times':sorted(index.lookup('stop_times.txt',selected),key=lambda row:int(row.get('stop_sequence') or 0)),
             'services':services,'disclaimer':DISCLAIMER}
@@ -71,11 +90,16 @@ def _records_table(records):
 
 def export_excel(report, paths, missing, search=''):
     data=missing_report(report,missing,search);index=get_index(paths[data['present']]) if data['routes'] else None
-    variants=[];trips=[];time_groups=[];route_rows=[];stop_ids=set();shape_ids=set();service_ids=set()
+    variants=[];missing_items=[];comparisons=[];trips=[];time_groups=[];route_rows=[];stop_ids=set();shape_ids=set();service_ids=set()
     for route in data['routes']:
         for entry in route['variations']:
             item=entry['variation'];prefix={'route_number':route['route_short_name'],'variation':item['variation_id']}
-            variants.append({**prefix,'missing_source':data['title'],'reason':entry['pair'].get('reason',''),**{key:value for key,value in item.items() if key!='trip_ids'}})
+            variants.append({**prefix,'missing_source':data['title'],'issue_kind':entry['issue_kind'],'missing_stop_count':len(entry['missing_stops']),'reason':entry['pair'].get('reason',''),**{key:value for key,value in item.items() if key!='trip_ids'}})
+            missing_items.extend({**prefix,'missing_source':data['title'],'counterpart_variation':entry['pair'].get('clevercad_variation_id' if missing=='cad' else 'hastus_variation_id',''),**stop} for stop in entry['missing_stops'])
+            if entry['issue_kind']!='unpaired_pattern':
+                evidence=variation_evidence(report,paths,missing,str(route['route_short_name']),item['variation_id'])
+                for row in evidence['comparison']['alignment']:
+                    comparisons.append({**prefix,'result':row['status'],'CleverCAD':row.get('clevercad') or {},'HASTUS':row.get('hastus') or {}})
             ids=item.get('trip_ids') or [item['example_trip_id']]
             rows=index.lookup_many('trips.txt',ids,entity=True)
             trips.extend({**prefix,**row} for row in rows)
@@ -100,10 +124,10 @@ def export_excel(report, paths, missing, search=''):
     services=[{'source_file':name,**row} for name in ('calendar.txt','calendar_dates.txt') if index and name in index.columns
               for row in index.rows(name) if row.get('service_id') in service_ids]
     metadata=[['Report',data['title']],['Meaning',DISCLAIMER],['Audit completed',data['completed_at'] or ''],['Search filter',search],
-              ['Affected routes',data['route_count']],['Unpaired variations',data['variation_count']],['Source trips',data['trip_count']]]
+              ['Affected routes',data['route_count']],['Affected variations',data['variation_count']],['Missing stop occurrences',data['missing_stop_count']],['Unpaired patterns',data['unpaired_variation_count']],['Source trips',data['trip_count']]]
     metadata.extend([[label,json.dumps(value,ensure_ascii=False)] for label,value in data['inputs'].items()])
     sheets=[('Report',metadata),('Variations',_records_table(variants)),('Routes',_records_table(list({row.get('route_id'):row for row in route_rows}.values()))),
-            ('Trips',_records_table(trips)),('Stop times',times),('Stops',_records_table(stops)),('Shapes',shapes),('Services',_records_table(services))]
+            ('Trips',_records_table(trips)),('Stop times',times),('Stops',_records_table(stops)),('Shapes',shapes),('Services',_records_table(services)),('Missing items',_records_table(missing_items)),('Comparisons',_records_table(comparisons))]
     return _xlsx(sheets)
 
 
@@ -153,9 +177,18 @@ def printable_report(report, paths, missing, search=''):
             item=entry['variation'];detail=trip_detail(paths[data['present']],item['example_trip_id'])
             fields={key:value for key,value in item.items() if key not in {'trip_ids','pattern_fingerprint','has_problem','affected_journeys','comparable_journeys'}}
             summary=''.join(f'<dt>{escape(key.replace("_"," "))}</dt><dd>{escape(json.dumps(value,ensure_ascii=False) if isinstance(value,(dict,list)) else str(value))}</dd>' for key,value in fields.items())
-            stops=''.join(f'<tr><td>{escape(str(stop.get("sequence","")))}</td><td>{escape(stop.get("source_stop_id",""))}</td><td>{escape(stop.get("stop_name",""))}</td><td>{escape(stop.get("arrival_time", ""))}</td><td>{escape(stop.get("departure_time", ""))}</td></tr>' for stop in detail['stops'])
+            missing_positions={stop['position'] for stop in entry['missing_stops']}
+            highlight=' style="background:#fff2bb"'
+            stops=''.join(f'<tr{highlight if position in missing_positions else ""}><td>{escape(str(stop.get("sequence","")))}</td><td>{escape(stop.get("source_stop_id",""))}</td><td>{escape(stop.get("stop_name",""))}</td><td>{escape(stop.get("arrival_time", ""))}</td><td>{escape(stop.get("departure_time", ""))}</td></tr>' for position,stop in enumerate(detail['stops'],1))
+            issue='Unpaired pattern — review required' if entry['issue_kind']=='unpaired_pattern' else 'Stops missing from paired counterpart'
+            missing_list='<ul>'+''.join(f'<li>{escape(stop.get("stop_name") or stop["source_stop_id"])} · {escape(stop["source_stop_id"])} · position {stop["position"]} · {escape(", ".join(stop.get("mismatch_positions",[])))}</li>' for stop in entry['missing_stops'])+'</ul>'
             trip_fields=''.join(f'<dt>{escape(key)}</dt><dd>{escape(str(value))}</dd>' for key,value in detail['trip'].items())
-            variations.append(f'<article><h3>{escape(item["variation_id"])}</h3><p>{escape(entry["pair"].get("reason",""))}</p><dl>{summary}</dl><h4>Representative trip — complete attributes</h4><dl>{trip_fields}</dl><h4>Representative stop sequence</h4><table><thead><tr><th>Sequence</th><th>Stop ID</th><th>Stop name</th><th>Arrival</th><th>Departure</th></tr></thead><tbody>{stops}</tbody></table></article>')
+            comparison_html=''
+            if entry['issue_kind']!='unpaired_pattern':
+                evidence=variation_evidence(report,paths,missing,str(route['route_short_name']),item['variation_id'])
+                rows=''.join('<tr><td>'+escape(row['status'])+'</td>'+''.join('<td>'+escape((row.get(source) or {}).get('source_stop_id','—'))+' · '+escape((row.get(source) or {}).get('stop_name','—'))+' · '+escape((row.get(source) or {}).get('departure_time',''))+'</td>' for source in ('clevercad','hastus'))+'</tr>' for row in evidence['comparison']['alignment'])
+                comparison_html='<h4>Full paired stop comparison</h4><table><thead><tr><th>Result</th><th>CleverCAD</th><th>HASTUS</th></tr></thead><tbody>'+rows+'</tbody></table>'
+            variations.append(f'<article><h3>{escape(item["variation_id"])}</h3><h4>{issue}</h4>{missing_list}<p>{escape(entry["pair"].get("reason",""))}</p><dl>{summary}</dl><h4>Representative trip — complete attributes</h4><dl>{trip_fields}</dl><h4>Representative stop sequence</h4><table><thead><tr><th>Sequence</th><th>Stop ID</th><th>Stop name</th><th>Arrival</th><th>Departure</th></tr></thead><tbody>{stops}</tbody></table>{comparison_html}</article>')
         sections.append(f'<section><h2>Route {escape(str(route["route_short_name"]))}</h2>'+''.join(variations)+'</section>')
     sources=''.join(f'<li>{escape(label)}: {escape(json.dumps(value,ensure_ascii=False))}</li>' for label,value in data['inputs'].items())
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{escape(data['title'])} — GTFS review report</title>

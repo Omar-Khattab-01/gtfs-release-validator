@@ -51,6 +51,7 @@ class TripSummary:
     stop_sequence: tuple[str, ...]
     stop_fingerprint: str
     schedule_fingerprint: str
+    source_stop_sequence: tuple[str, ...] = ()
 
     @property
     def journey_key(self) -> tuple[str, str, str, str, str]:
@@ -236,7 +237,7 @@ def _trip_summaries(
     summaries: dict[str, list[TripSummary]] = defaultdict(list)
     closed: set[str] = set()
     current_id: str | None = None
-    current_rows: list[tuple[int, str, str, str, str, str]] = []
+    current_rows: list[tuple[int, str, str, str, str, str, str]] = []
 
     def finish() -> bool:
         nonlocal current_id, current_rows
@@ -249,7 +250,7 @@ def _trip_summaries(
         current_rows.sort(key=lambda item: item[0])
         stops_digest = hashlib.sha256()
         schedule_digest = hashlib.sha256()
-        for position, (sequence, stop_id, arrival, departure, pickup, dropoff) in enumerate(current_rows, start=1):
+        for position, (sequence, stop_id, arrival, departure, pickup, dropoff, source_stop_id) in enumerate(current_rows, start=1):
             # A variation is the ordered translated stop pattern. Source exports
             # may number the same sequence differently, so use list position.
             stops_digest.update(f"{position}|{stop_id}\n".encode())
@@ -272,6 +273,7 @@ def _trip_summaries(
             stop_sequence=tuple(row[1] for row in current_rows),
             stop_fingerprint=stops_digest.hexdigest(),
             schedule_fingerprint=schedule_digest.hexdigest(),
+            source_stop_sequence=tuple(row[6] for row in current_rows),
         )
         summaries[canonical].append(summary)
         closed.add(current_id)
@@ -313,6 +315,7 @@ def _trip_summaries(
                         (row.get("departure_time") or "").strip(),
                         (row.get("pickup_type") or "").strip(),
                         (row.get("drop_off_type") or "").strip(),
+                        stop_id,
                     )
                 )
         finish()
@@ -517,6 +520,8 @@ def _audit_trip_patterns(
     hastus_summaries: dict[str, list[TripSummary]],
     final_summaries: dict[str, list[TripSummary]] | None,
     report: ValidationReport,
+    cad_stops: dict | None = None,
+    hastus_stops: dict | None = None,
 ) -> None:
     if final_summaries is not None:
         for canonical_id, final_variants in final_summaries.items():
@@ -592,6 +597,7 @@ def _audit_trip_patterns(
                         "variation_id": variation_id,
                         "pattern_fingerprint": fingerprint,
                         "_stop_sequence": trips[0].stop_sequence,
+                        "_source_stop_sequence": example.source_stop_sequence or example.stop_sequence,
                         "example_trip_id": example.trip_id,
                         "trip_ids": sorted({trip.trip_id for trip in trips}),
                         "stop_count": trips[0].stop_count,
@@ -710,6 +716,22 @@ def _audit_trip_patterns(
         for pair in variation_pairs:
             cad_pattern = next((item for item in cad_variations if item["variation_id"] == pair["clevercad_variation_id"]), None)
             hastus_pattern = next((item for item in hastus_variations if item["variation_id"] == pair["hastus_variation_id"]), None)
+            pair['only_in_clevercad'] = []
+            pair['only_in_hastus'] = []
+            if cad_pattern and hastus_pattern and cad_pattern['_stop_sequence'] != hastus_pattern['_stop_sequence']:
+                # Use the same ordered alignment as the full comparison view.
+                # A replacement has both sides; only insertion/deletion rows
+                # belong in the missing-source tabs.
+                from .details import _align_sequences
+                sides=[]
+                for pattern,stops in ((cad_pattern,cad_stops or {}),(hastus_pattern,hastus_stops or {})):
+                    sides.append({'stops':[{'canonical_stop_id':canonical,'source_stop_id':raw,
+                                           'sequence':str(index+1),'position':index+1,
+                                           'stop_name':stops.get(raw,{}).get('stop_name','')}
+                                          for index,(canonical,raw) in enumerate(zip(pattern['_stop_sequence'],pattern['_source_stop_sequence']))]})
+                for row in _align_sequences(sides):
+                    if row['status']=='clevercad_only':pair['only_in_clevercad'].append({**row['clevercad'],'mismatch_positions':row.get('mismatch_positions',[])})
+                    elif row['status']=='hastus_only':pair['only_in_hastus'].append({**row['hastus'],'mismatch_positions':row.get('mismatch_positions',[])})
             pair["final_matches"] = [{**item, "matches_source": "Both" if cad_pattern and hastus_pattern and item["pattern_fingerprint"] == cad_pattern["pattern_fingerprint"] == hastus_pattern["pattern_fingerprint"] else "CleverCAD" if cad_pattern and item["pattern_fingerprint"] == cad_pattern["pattern_fingerprint"] else "HASTUS"}
                 for item in final_variations if any(source and source["pattern_fingerprint"] == item["pattern_fingerprint"] for source in (cad_pattern, hastus_pattern))]
         cad_by_variation = {str(item["variation_id"]): item for item in cad_variations}
@@ -1141,7 +1163,8 @@ def validate_exports(
             if final:
                 _audit_entity_provenance(cad, hastus, final, report, rail)
             if cad_summaries and hastus_summaries and (final_summaries or final is None):
-                _audit_trip_patterns(cad_summaries, hastus_summaries, final_summaries, report)
+                _audit_trip_patterns(cad_summaries, hastus_summaries, final_summaries, report,
+                                     {row['stop_id']:row for row in cad.stops},{row['stop_id']:row for row in hastus.stops})
     finally:
         for feed in loaded:
             feed.close()

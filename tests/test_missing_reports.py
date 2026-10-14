@@ -81,3 +81,48 @@ class MissingReportTests(unittest.TestCase):
         escaped=printable_report(self.report,self.paths,'hastus','<script>alert(1)</script>').decode()
         self.assertNotIn('<script>alert(1)</script>',escaped)
         self.assertIn('&lt;script&gt;',escaped)
+
+    def test_paired_variation_extra_middle_stop_is_missing_in_hastus(self):
+        write_feed(self.cad,extra={'stop_times.txt':FILES['stop_times.txt'].replace('20000,2','20000,3').replace('t1,25:15:', 't1,25:05:00,25:05:00,10014,2,0,0,1\nt1,25:15:')})
+        write_feed(self.hastus)
+        report=validate_exports(self.cad,self.hastus).to_dict()
+        health=report['stats']['trip_reconciliation']['route_health'][0]
+        self.assertEqual('issues',health['variation_pairs'][0]['status'])
+        result=missing_report(report,'hastus')
+        self.assertEqual(1,result['missing_stop_count']);self.assertEqual(0,result['unpaired_variation_count'])
+        entry=result['routes'][0]['variations'][0]
+        self.assertEqual('missing_stops_in_paired_variation',entry['issue_kind'])
+        self.assertEqual('ST-LAURENT A',entry['missing_stops'][0]['stop_name'])
+        self.assertEqual(['middle'],entry['missing_stops'][0]['mismatch_positions'])
+        self.assertEqual(0,missing_report(report,'cad')['variation_count'])
+        self.assertEqual(1,missing_report(report,'hastus','ST-LAURENT A')['variation_count'])
+        evidence=variation_evidence(report,self.paths,'hastus','19',entry['variation']['variation_id'])
+        self.assertEqual(2,len(evidence['counterpart']['stops']))
+        self.assertEqual(['match','clevercad_only','match'],[row['status'] for row in evidence['comparison']['alignment']])
+        with zipfile.ZipFile(io.BytesIO(export_excel(report,self.paths,'hastus'))) as archive:
+            self.assertIn('Missing items',archive.read('xl/workbook.xml').decode())
+            self.assertIn('ST-LAURENT A',archive.read('xl/worksheets/sheet9.xml').decode())
+            self.assertIn('clevercad_only',archive.read('xl/worksheets/sheet10.xml').decode())
+        html=printable_report(report,self.paths,'hastus').decode()
+        self.assertIn('Stops missing from paired counterpart',html)
+        self.assertIn('Full paired stop comparison',html)
+
+    def test_missing_in_cad_direction_and_same_stop_occurrences_not_sets(self):
+        # Both feeds contain 10014; its occurrence is in a different position.
+        first=FILES['stop_times.txt'].replace('20000,2','20000,3').replace('t1,25:15:', 't1,25:05:00,25:05:00,10014,2,0,0,1\nt1,25:15:')
+        second=FILES['stop_times.txt']+'t1,25:15:00,25:15:00,10014,3,0,0,1\n'
+        write_feed(self.cad,extra={'stop_times.txt':first});write_feed(self.hastus,extra={'stop_times.txt':second})
+        report=validate_exports(self.cad,self.hastus).to_dict()
+        # SequenceMatcher chooses the A occurrence as its anchor; P is then
+        # source-only at opposite positions, exactly as the comparison view.
+        for missing,position in [('hastus',3),('cad',2)]:
+            entry=missing_report(report,missing)['routes'][0]['variations'][0]
+            self.assertEqual(position,entry['missing_stops'][0]['position'])
+            self.assertEqual('20000',entry['missing_stops'][0]['source_stop_id'])
+
+    def test_stop_replacement_is_not_falsely_classified_as_missing_in_both(self):
+        write_feed(self.cad);write_feed(self.hastus,extra={'stop_times.txt':FILES['stop_times.txt'].replace('10017,1','10014,1')})
+        report=validate_exports(self.cad,self.hastus).to_dict()
+        self.assertEqual('issues',report['stats']['trip_reconciliation']['route_health'][0]['variation_pairs'][0]['status'])
+        self.assertEqual(0,missing_report(report,'cad')['variation_count'])
+        self.assertEqual(0,missing_report(report,'hastus')['variation_count'])

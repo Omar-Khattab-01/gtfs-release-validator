@@ -23,3 +23,12 @@ test('Empty report and malformed source-only catalogs produce no misleading rows
   assert.equal(missingRows([],'hastus').length,0);
   assert.equal(missingRows([{variation_pairs:[{status:'not_comparable',clevercad_variation_id:'missing-id'}]}],'hastus').length,0);
 });
+test('Paired source-only stop rows appear in the correct report and can be searched by stop name',()=>{
+  const missingRows=vm.runInNewContext(helper+'\nmissingRows');
+  const paired=[{route_short_name:'19',clevercad_variations:[{variation_id:'CAD V1'}],hastus_variations:[{variation_id:'HASTUS V1'}],variation_pairs:[{status:'issues',clevercad_variation_id:'CAD V1',hastus_variation_id:'HASTUS V1',only_in_clevercad:[{source_stop_id:'10014',stop_name:'ST-LAURENT A',position:2}],only_in_hastus:[]}]}];
+  assert.equal(missingRows(paired,'hastus').length,1);
+  assert.equal(missingRows(paired,'cad').length,0);
+  assert.equal(missingRows(paired,'hastus','st-laurent a').length,1);
+  assert.equal(missingRows(paired,'hastus')[0].unpaired,false);
+  assert.equal(missingRows(paired,'hastus')[0].missingStops[0].position,2);
+});
