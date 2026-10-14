@@ -25,6 +25,8 @@ from .feed_index import get_index, clear_indexes, cache_info
 from .final_checks import agency_checks, mobility_checks, offline_mobility_report
 from . import audit_cache
 from .input_paths import normalize_path
+from .rail import audit_rail, trip_evidence
+from .models import ValidationReport
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -38,6 +40,7 @@ class Job:
     clevercad_path: str
     hastus_path: str
     final_path: str = ""
+    rail_path: str = ""
     status: str = "queued"
     progress: str = "Waiting to start"
     save_indexes: bool = False
@@ -66,6 +69,7 @@ class Job:
                 "clevercad_path": self.clevercad_path,
                 "hastus_path": self.hastus_path,
                 "final_path": self.final_path,
+                "rail_path": self.rail_path,
                 "status": self.status,
                 "progress": self.progress,
                 "error": self.error,
@@ -88,7 +92,7 @@ def _run_job(job: Job) -> None:
         job.progress = "Validating ZIPs and comparing exports"
     try:
         index_errors = []
-        for label, path in (("CleverCAD", job.clevercad_path), ("HASTUS", job.hastus_path), ("Final GTFS", job.final_path)):
+        for label, path in (("CleverCAD", job.clevercad_path), ("HASTUS", job.hastus_path), ("Final GTFS", job.final_path), ("HASTUS rail",job.rail_path)):
             if not path:
                 continue
             with job.lock:
@@ -118,9 +122,20 @@ def _run_job(job: Job) -> None:
                 job.audit_cache_status = f'Saved audit unavailable: {exc}'
         with job.lock:
             job.progress = "Validating ZIPs and comparing exports"
-        report = validate_merge(job.clevercad_path, job.hastus_path, job.final_path) if job.clevercad_path and job.hastus_path else validate_feed(job.final_path)
-        if not job.clevercad_path and not job.hastus_path:
-            report.stats["inputs"] = {"Final merged GTFS": {"path": job.final_path, "sha256": report.sha256}}
+        if job.clevercad_path and job.hastus_path:
+            report = validate_merge(job.clevercad_path,job.hastus_path,job.final_path,rail_path=job.rail_path) if job.rail_path else validate_merge(job.clevercad_path,job.hastus_path,job.final_path)
+        else:
+            report = validate_feed(job.final_path) if job.final_path else ValidationReport(source_path=job.rail_path,profile='rail-source-preflight')
+            if job.final_path:
+                report.stats['final_technical_findings']=[item.to_dict() for item in report.findings]
+            if job.rail_path:
+                try:
+                    report.stats['rail']=audit_rail(job.rail_path,job.final_path,'','',report)
+                except (OSError,ValueError,KeyError) as exc:
+                    report.stats['rail']={'status':'failed','message':str(exc),'routes':[]}
+                    report.add('RAIL999','error','Rail validation','Rail inspection could not complete',str(exc))
+        if job.final_path and not job.clevercad_path and not job.hastus_path:
+            report.stats.setdefault('inputs',{})['Final merged GTFS']={"path":job.final_path,"sha256":report.sha256}
         if index_errors:
             report.stats["browse_index_errors"] = index_errors
         if job.final_path:
@@ -151,6 +166,7 @@ def _run_job(job: Job) -> None:
                     report.add("FINAL001", "warning", "Final validation", f"{engine} checks could not complete", str(exc), context={"engine": engine})
             job.final_validation = final
             report.finish()
+        report.finish()
         with job.lock:
             job.report = report.to_dict()
         if cache_identity and not index_errors:
@@ -173,7 +189,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.9.3"
+    server_version = "GTFSValidator/0.10.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -242,7 +258,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed_url.query)
                 get = lambda key, default="": str((query.get(key) or [default])[0])
                 source = get("source", "final")
-                feed_path = {"cad": job.clevercad_path, "hastus": job.hastus_path, "final": job.final_path}.get(source)
+                feed_path = {"cad": job.clevercad_path, "hastus": job.hastus_path, "final": job.final_path, "rail":job.rail_path}.get(source)
                 if not feed_path:
                     return self._json(HTTPStatus.BAD_REQUEST, {"error": "This source was not supplied"})
                 key = (source, get("route_id"), get("trip_id"), get("table"), get("offset", "0"))
@@ -263,6 +279,19 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                     return self._json(HTTPStatus.OK, data)
                 except (OSError, KeyError, ValueError, UnicodeDecodeError, csv.Error, zipfile.BadZipFile, sqlite3.Error) as exc:
                     return self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": f"Could not inspect feed: {exc}"})
+            if len(parts) == 4 and parts[3] == "rail-detail":
+                query=parse_qs(parsed_url.query)
+                trip=str((query.get('trip_id') or [''])[0]);final_trip=str((query.get('final_trip_id') or [''])[0])
+                if not job.rail_path:return self._json(HTTPStatus.BAD_REQUEST,{'error':'No rail export supplied'})
+                try:
+                    key=('rail-detail',trip,final_trip)
+                    with job.lock:data=job.viewer_cache.get(key)
+                    if data is None:
+                        data=trip_evidence(job.rail_path,job.final_path,trip,final_trip)
+                        with job.lock:job.viewer_cache[key]=data
+                    return self._json(HTTPStatus.OK,data)
+                except (OSError,ValueError,KeyError,sqlite3.Error) as exc:
+                    return self._json(HTTPStatus.UNPROCESSABLE_ENTITY,{'error':str(exc)})
             if len(parts) == 4 and parts[3] == "report.json":
                 payload = job.public()
                 if payload.get("report") is None:
@@ -378,14 +407,16 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         clevercad_path = normalize_path(payload.get("clevercad_path", ""))
         hastus_path = normalize_path(payload.get("hastus_path", ""))
         final_path = normalize_path(payload.get("final_path", ""))
-        if bool(clevercad_path) != bool(hastus_path) or (not clevercad_path and not final_path):
-            return self._json(HTTPStatus.BAD_REQUEST, {"error": "Supply both sources, or only a final GTFS ZIP to validate and inspect it"})
+        rail_path = normalize_path(payload.get('rail_path',''))
+        if bool(clevercad_path) != bool(hastus_path) or (not clevercad_path and not final_path and not rail_path):
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": "Supply both bus sources, a rail export, or a final GTFS ZIP"})
 
         job = Job(
             id=uuid.uuid4().hex[:12],
             clevercad_path=clevercad_path,
             hastus_path=hastus_path,
             final_path=final_path,
+            rail_path=rail_path,
             save_indexes=payload.get("save_indexes") is True,
             force_revalidate=payload.get("force_revalidate") is True,
             run_agency=payload.get("run_agency") is True,

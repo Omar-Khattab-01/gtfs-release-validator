@@ -2,6 +2,9 @@ const form = document.querySelector('#run-form');
 const clevercadInput = document.querySelector('#clevercad-path');
 const hastusInput = document.querySelector('#hastus-path');
 const finalInput = document.querySelector('#final-path');
+const railInput = document.querySelector('#rail-path');
+let railData = {routes:[]};
+let railEvidenceRequest = 0;
 const runButton = document.querySelector('#run-button');
 const runningPanel = document.querySelector('#running-panel');
 const results = document.querySelector('#results');
@@ -42,7 +45,7 @@ async function viewerFetch(params = {}) {
 
 async function setupViewer(inputs) {
   const source = document.querySelector('#viewer-source');
-  const names = {final:'Final merged GTFS', cad:'CleverCAD', hastus:'HASTUS'};
+  const names = {final:'Final merged GTFS', cad:'CleverCAD', hastus:'HASTUS',rail:'HASTUS rail'};
   for (const option of source.options) option.disabled = !inputs[names[option.value]];
   source.value = [...source.options].find(option => !option.disabled)?.value || 'final';
   await loadViewer();
@@ -214,6 +217,7 @@ form.addEventListener('submit', async (event) => {
         clevercad_path: clevercadInput.value.trim(),
         hastus_path: hastusInput.value.trim(),
         final_path: finalInput.value.trim(),
+        rail_path: railInput.value.trim(),
         save_indexes: document.querySelector('#save-indexes').checked,
         force_revalidate: document.querySelector('#force-revalidate').checked,
         run_agency: document.querySelector('#run-agency').checked,
@@ -275,6 +279,7 @@ function renderReport(report, id) {
   categoryFilter.innerHTML = '<option value="">All categories</option>' + categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
   renderRouteHealth(report.stats?.trip_reconciliation?.route_health || []);
   renderStopMapping(report.stats?.stop_crosswalk || {});
+  renderRail(report.stats?.rail);
   renderIssueGroups();
   renderFindings();
   renderInventory(report);
@@ -568,7 +573,7 @@ function renderInventory(report) {
 
 function renderPackaging(report) {
   const files = Object.entries(report.files);
-  document.querySelector('#packaging').innerHTML = report.profile === 'oc-transpo-source-preflight'
+  document.querySelector('#packaging').innerHTML = ['oc-transpo-source-preflight','rail-source-preflight'].includes(report.profile)
     ? '<div class="package-row"><span>Final merged GTFS</span><strong>Not supplied</strong></div><p class="field-help">Final artifact and permission checks were skipped. Add the merged ZIP after the vendor produces it.</p>'
     : `<div class="package-row"><span>Final archive size</span><strong>${formatBytes(report.archive_size)}</strong></div><div class="package-row"><span>Members inspected</span><strong>${files.length}</strong></div><div class="package-row"><span>Members stored as 0644</span><strong>${files.filter(([,v]) => v.stored_mode === '644').length} / ${files.length}</strong></div><div class="package-row"><span>System extraction tested</span><strong>${report.stats.extracted_permissions ? 'Yes' : 'Unavailable'}</strong></div>`;
 }
@@ -576,6 +581,14 @@ function renderPackaging(report) {
 async function openDetail(index) {
   const finding = activeFindings.find(item => item._index === index);
   if (!finding) return;
+  if (finding.rule_id.startsWith('RAIL')) {
+    document.querySelector('.workspace-tab[data-view="rail"]').click();
+    const route = railData.routes.find(item => item.route_short_name === finding.context?.route_short_name);
+    if (route) openRailRoute(route);
+    else renderRail(railData);
+    document.querySelector('#rail-view').scrollIntoView({block:'start'});
+    return;
+  }
   if (finding.rule_id === 'FINAL001') {
     document.querySelector('.workspace-tab[data-view="final"]').click();
     document.querySelector('#final-view').scrollIntoView({block:'start'});
@@ -660,6 +673,74 @@ function csvCell(value) {
   return `"${text.replaceAll('"','""')}"`;
 }
 
+function renderRail(data) {
+  railData = data || {routes:[]};
+  const summary = document.querySelector('#rail-summary');
+  const content = document.querySelector('#rail-content');
+  const counts = data?.source_checks?.counts || {};
+  summary.textContent = !data ? 'No separate HASTUS rail export supplied.' : data.status === 'failed' ? `Rail inspection failed: ${data.message}`
+    : `${data.trip_count} rail trips · ${data.variation_count} shape/stop variations · ${data.status === 'not_compared' ? 'Not compared: final GTFS not supplied.' : `Final publication window: ${data.coverage_window?.join(' to ') || 'Unknown — review required'}`} · Source validation: ${counts.blocker || 0} blockers, ${counts.error || 0} errors, ${counts.warning || 0} warnings. Rail is never compared with the bus sources.`;
+  content.innerHTML = (data?.unexpected_bus_sources || []).map(item => `<p class="variation-error">Unexpected rail line ${escapeHtml(item.route.route_short_name)} in ${escapeHtml(item.source)} (${item.trip_count} trips). Excluded from bus comparison.</p>`).join('') + '<p>Choose a line, then a variation and trip. All source trips remain available, including service outside the final publication window.</p>'
+    + (data?.source_checks ? `<details><summary>Rail source validation findings</summary><ul>${data.source_checks.findings.map(item => `<li>${escapeHtml(item.rule_id)} · ${escapeHtml(item.title)} · ${escapeHtml(item.message)}</li>`).join('')}</ul></details>` : '') + (data?.stop_differences?.length ? `<details><summary>Rail stops missing or changed (${data.stop_differences.length})</summary>${data.stop_differences.map(item=>`<details><summary>${escapeHtml(item.rail_stop_id)} · ${escapeHtml(item.fields.join(', '))}</summary><div class="source-grid">${sourceCard('HASTUS rail stop',item.rail)}${sourceCard('Final stop',item.final||{})}</div></details>`).join('')}</details>` : '');
+  document.querySelector('#rail-routes').innerHTML = railData.routes.map((route,index) => `<button class="route-card ${route.status === 'matching' ? 'healthy' : route.status === 'issues' ? 'issues' : 'not_comparable'}" data-index="${index}"><strong>Line ${escapeHtml(route.route_short_name)}</strong><span>${route.variations.length} variations · ${route.trip_count} trips · ${escapeHtml(route.status.replaceAll('_',' '))}</span></button>`).join('');
+  document.querySelectorAll('#rail-routes button').forEach(button => button.addEventListener('click',() => openRailRoute(railData.routes[Number(button.dataset.index)])));
+}
+
+function openRailRoute(route) {
+  railEvidenceRequest++;
+  const content=document.querySelector('#rail-content');
+  content.innerHTML=`<h4>Line ${escapeHtml(route.route_short_name)} · ${escapeHtml(route.route.route_long_name)}</h4>${sourceCard('HASTUS rail route attributes',route.route)}${route.final_routes.map(item=>sourceCard('Final route attributes',item)).join('')}<p>${railData.status === 'not_compared' ? 'No final GTFS supplied; not compared.' : `Final feed: ${route.final_variation_count} variations.`} ${escapeHtml((route.route_attribute_changes||[]).map(item=>item.fields.join(', ')).join(' · '))}</p><div id="rail-final-route">${route.final_routes.map((item,index)=>`<button data-index="${index}">Inspect all final variations for line ${escapeHtml(route.route_short_name)}</button>`).join('')}</div><p>${Object.entries(route.counts).map(([key,value])=>`${value} ${escapeHtml(key.replaceAll('_',' '))}`).join(' · ')}</p><div id="rail-variation-tabs" class="variation-tabs">${route.variations.map((variation,index)=>`<button class="variation-tab" data-index="${index}">${escapeHtml(variation.variation_id)} · ${variation.stop_count} stops · ${variation.trip_count} trips · direction ${escapeHtml(variation.direction_id)} · shape ${escapeHtml(variation.shape_id)} · ${escapeHtml(variation.status.replaceAll('_',' '))}</button>`).join('')}</div><div id="rail-trip-list"></div><div id="rail-trip-evidence"></div><details><summary>Unmatched final rail trips (${route.extra_final_trips.length})</summary><div id="rail-extra-trips">${route.extra_final_trips.map((trip,index)=>`<button data-index="${index}">${escapeHtml(trip.first_time)}–${escapeHtml(trip.last_time)} · ${escapeHtml(trip.trip_id)}</button>`).join('')}</div></details>`;
+  document.querySelectorAll('#rail-variation-tabs button').forEach(button=>button.addEventListener('click',()=>openRailVariation(route,route.variations[Number(button.dataset.index)])));
+  document.querySelectorAll('#rail-final-route button').forEach(button=>button.addEventListener('click',async()=>{
+    document.querySelector('#viewer-source').value='final';
+    await loadViewer();
+    document.querySelector('.workspace-tab[data-view="viewer"]').click();
+    await openViewerRoute(route.final_routes[Number(button.dataset.index)].route_id);
+  }));
+  document.querySelectorAll('#rail-extra-trips button').forEach(button=>button.addEventListener('click',async()=>{
+    const request=++railEvidenceRequest;
+    const trip=route.extra_final_trips[Number(button.dataset.index)];
+    const target=document.querySelector('#rail-trip-evidence');
+    try {
+      const response=await fetch(`/api/runs/${currentRunId}/viewer?${new URLSearchParams({source:'final',trip_id:trip.trip_id})}`);
+      const data=await response.json();if(!response.ok)throw new Error(data.error);
+      if(request!==railEvidenceRequest||!target.isConnected)return;
+      target.innerHTML='<h4>Unmatched final rail trip (no source match claimed)</h4>'+sourceCard('Final trip attributes',data.trip)+renderShapeMap(data);
+      target.innerHTML+=`<div class="comparison-table"><table><thead><tr><th>Sequence</th><th>Final stop</th><th>Arrival / departure</th></tr></thead><tbody>${data.stops.map(stop=>`<tr><td>${escapeHtml(stop.sequence)}</td><td><details><summary>${escapeHtml(stop.stop_name)} · ${escapeHtml(stop.source_stop_id)}</summary>${sourceCard('Final stop attributes',stop.source_record)}</details></td><td>${escapeHtml(stop.arrival_time)} / ${escapeHtml(stop.departure_time)}</td></tr>`).join('')}</tbody></table></div>`;
+    }catch(error){if(request===railEvidenceRequest)target.textContent=error.message;}
+  }));
+  if(route.variations.length)openRailVariation(route,route.variations[0]);
+}
+
+function openRailVariation(route,variation) {
+  railEvidenceRequest++;
+  const list=document.querySelector('#rail-trip-list');
+  list.innerHTML=`<h4>${escapeHtml(variation.variation_id)} · ${escapeHtml(variation.status.replaceAll('_',' '))}</h4><label>Trip review filter<select id="rail-trip-filter"><option value="">All source trips</option><option value="missing">Missing</option><option value="issues">Differences</option><option value="matching">Matching</option><option value="outside_final_window">Outside final coverage</option><option value="unverifiable">Unverifiable</option><option value="not_compared">Not compared</option></select></label><label>Rail trip<select id="rail-trip-choice"></select></label>`;
+  const show=()=>{
+    const trips=variation.trips.filter(trip=>!document.querySelector('#rail-trip-filter').value||trip.status===document.querySelector('#rail-trip-filter').value);
+    const choice=document.querySelector('#rail-trip-choice');
+    choice.innerHTML=trips.map(trip=>`<option value="${escapeHtml(trip.trip_id)}">${escapeHtml(trip.first_time)}–${escapeHtml(trip.last_time)} · ${escapeHtml(trip.record.trip_headsign)} · ${escapeHtml(trip.status.replaceAll('_',' '))} · ${escapeHtml(trip.trip_id)}</option>`).join('');
+    if(trips.length)inspectRailTrip(trips[0]);else {railEvidenceRequest++;document.querySelector('#rail-trip-evidence').textContent='No trips match this review filter.';}
+  };
+  document.querySelector('#rail-trip-filter').addEventListener('change',show);
+  document.querySelector('#rail-trip-choice').addEventListener('change',event=>inspectRailTrip(variation.trips.find(trip=>trip.trip_id===event.target.value)));
+  show();
+}
+
+async function inspectRailTrip(trip,finalTripId=trip.final_trip_ids[0] || '') {
+  const request=++railEvidenceRequest;
+  const target=document.querySelector('#rail-trip-evidence');
+  target.textContent='Loading full rail trip and final evidence…';
+  try {
+    const response=await fetch(`/api/runs/${currentRunId}/rail-detail?${new URLSearchParams({trip_id:trip.trip_id,final_trip_id:finalTripId})}`);
+    const data=await response.json();if(!response.ok)throw new Error(data.error);
+    if(request!==railEvidenceRequest||!target.isConnected)return;
+    const rows=data.final?data.alignment:data.rail.stops.map(stop=>({clevercad:stop,hastus:null,status:'not_compared'}));
+    target.innerHTML=`<p>${escapeHtml(trip.status.replaceAll('_',' '))} · identity evidence: ${escapeHtml(trip.matching_method)}</p><ul>${trip.issues.map(issue=>`<li>${escapeHtml(issue)}</li>`).join('')}</ul>${trip.missing_dates?.length?`<p>Missing operating dates: ${escapeHtml(trip.missing_dates.join(', '))}</p>`:''}${trip.final_trip_ids.length?`<label>Final candidate trip<select id="rail-final-choice">${trip.final_trip_ids.map(id=>`<option ${id===finalTripId?'selected':''}>${escapeHtml(id)}</option>`).join('')}</select></label>`:'<p>No final candidate selected; source inspection remains available.</p>'}<div class="source-grid">${sourceCard('HASTUS rail trip — all attributes',data.rail.trip)}${data.final?sourceCard('Final merged trip — all attributes',data.final.trip):''}</div><details><summary>Service calendar evidence</summary><pre>${escapeHtml(JSON.stringify(data.service,null,2))}</pre></details><details><summary>Shapes and stops (local maps)</summary><h4>HASTUS rail</h4>${renderShapeMap(data.rail)}${data.final?'<h4>Final merged GTFS</h4>'+renderShapeMap(data.final):''}</details><div class="comparison-table"><table><thead><tr><th>Result</th><th>Rail sequence</th><th>HASTUS rail stop and time</th><th>Final sequence</th><th>Final stop and time</th></tr></thead><tbody>${rows.map(row=>`<tr class="${escapeHtml(row.status.replaceAll('_','-'))}"><td>${escapeHtml(row.status.replaceAll('_',' '))}${row.fields?.length?'<br>'+escapeHtml(row.fields.join(', ')):''}</td>${['clevercad','hastus'].map(key=>`<td>${escapeHtml(row[key]?.sequence||'—')}</td><td>${row[key]?`<details><summary>${escapeHtml(row[key].stop_name)} · ${escapeHtml(row[key].source_stop_id)} · ${escapeHtml(row[key].arrival_time)} / ${escapeHtml(row[key].departure_time)}</summary>${sourceCard('Complete stop attributes',row[key].source_record)}<p>Pickup: ${escapeHtml(row[key].pickup_type)} · Drop-off: ${escapeHtml(row[key].drop_off_type)}</p></details>`:'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    document.querySelector('#rail-final-choice')?.addEventListener('change',event=>inspectRailTrip(trip,event.target.value));
+  } catch(error){if(request===railEvidenceRequest)target.textContent=error.message;}
+}
+
 function downloadRows(rows, filename) {
   if (!rows.length) return;
   const columns = ['rule_id','severity','category','title','key','observed','expected','file','row'];
@@ -716,6 +797,7 @@ document.querySelectorAll('.workspace-tab').forEach(tab => tab.addEventListener(
   document.querySelector('#stop-view').classList.toggle('hidden', tab.dataset.view !== 'stops');
   document.querySelector('#viewer-view').classList.toggle('hidden', tab.dataset.view !== 'viewer');
   document.querySelector('#final-view').classList.toggle('hidden', tab.dataset.view !== 'final');
+  document.querySelector('#rail-view').classList.toggle('hidden', tab.dataset.view !== 'rail');
 }));
 stopMappingSearch.addEventListener('input', () => { stopMappingLimit = 80; renderStopMappingRows(); });
 stopMappingFilter.addEventListener('change', () => { stopMappingLimit = 80; renderStopMappingRows(); });

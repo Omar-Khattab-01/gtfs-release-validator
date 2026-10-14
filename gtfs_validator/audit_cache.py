@@ -29,7 +29,7 @@ def identity(job) -> dict:
     value = {'schema':1, 'today':date.today().isoformat(), 'platform':platform.system(),
              'validation_date':job.validation_date,'release_policy':job.release_policy,
              'run_agency':job.run_agency,'run_mobility':job.run_mobility,
-             'feeds':[fingerprint(path) if path else None for path in (job.clevercad_path,job.hastus_path,job.final_path)],
+             'feeds':[fingerprint(path) if path else None for path in (job.clevercad_path,job.hastus_path,job.final_path,job.rail_path)],
              'code':[fingerprint(path) for path in sorted(PACKAGE.glob('*.py'))]}
     if job.final_path and job.run_agency:
         value['reference'] = fingerprint(job.sort_reference or PACKAGE / 'routes_sort_order_list.csv')
@@ -76,6 +76,8 @@ def load(value: dict) -> dict | None:
 
 
 def save(value: dict, job) -> str:
+    if job.report and job.report.get('stats',{}).get('rail',{}).get('status')=='failed':
+        return 'Not saved: rail inspection did not complete; next run will retry.'
     if job.final_validation and any(engine.get('status') not in {'complete','not_requested'} for engine in job.final_validation.values()):
         return 'Not saved: a validation engine did not complete; next run will retry.'
     if identity(job) != value:

@@ -1021,10 +1021,13 @@ def _audit_stops(
         report.stats["stop_crosswalk"]["final_stops"] = len(final_by_id)
 
 
-def _audit_entity_provenance(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report: ValidationReport) -> None:
+def _audit_entity_provenance(cad: SourceFeed, hastus: SourceFeed, final: SourceFeed, report: ValidationReport, rail: SourceFeed | None = None) -> None:
     cad_route_ids = {row.get("route_id", "") for row in cad.routes}
     hastus_route_ids = {row.get("route_id", "") for row in hastus.routes}
     final_route_ids = {row.get("route_id", "") for row in final.routes}
+    rail_names = {row.get('route_short_name','').strip() for row in rail.routes} if rail else set()
+    rail_route_ids = {row.get('route_id','') for row in final.routes if row.get('route_short_name','').strip() in rail_names}
+    hastus_route_ids |= rail_route_ids | ({row.get('route_id','') for row in rail.routes} if rail else set())
     for route_id in sorted(final_route_ids - cad_route_ids - hastus_route_ids):
         report.add(
             "MRG101",
@@ -1039,6 +1042,12 @@ def _audit_entity_provenance(cad: SourceFeed, hastus: SourceFeed, final: SourceF
     cad_trip_ids = {_source_trip_id(row) for row in cad.trips}
     hastus_trip_ids = {_source_trip_id(row) for row in hastus.trips}
     final_trip_ids = {_source_trip_id(row) for row in final.trips}
+    resolved_rail_trips = {value for route in report.stats.get('rail',{}).get('routes',[]) for variation in route['variations'] for trip in variation['trips'] for value in trip['final_trip_ids']}
+    rail_linked_rows = [row for row in final.trips if row.get('trip_id') in resolved_rail_trips]
+    if rail:
+        hastus_trip_ids |= {_source_trip_id(row) for row in rail.trips} | {_source_trip_id(row) for row in rail_linked_rows}
+    rail_shapes = (rail.shape_ids if rail else set()) | {row.get('shape_id','') for row in rail_linked_rows}
+    rail_services = (rail.service_ids if rail else set()) | {row.get('service_id','') for row in rail_linked_rows}
     for trip_id in sorted(final_trip_ids - cad_trip_ids - hastus_trip_ids):
         report.add(
             "MRG102",
@@ -1050,7 +1059,7 @@ def _audit_entity_provenance(cad: SourceFeed, hastus: SourceFeed, final: SourceF
             key=trip_id,
         )
 
-    for shape_id in sorted(final.shape_ids - cad.shape_ids - hastus.shape_ids):
+    for shape_id in sorted(final.shape_ids - cad.shape_ids - hastus.shape_ids - rail_shapes):
         report.add(
             "MRG103",
             "error",
@@ -1060,7 +1069,7 @@ def _audit_entity_provenance(cad: SourceFeed, hastus: SourceFeed, final: SourceF
             file="Final:shapes.txt",
             key=shape_id,
         )
-    for service_id in sorted(final.service_ids - cad.service_ids - hastus.service_ids):
+    for service_id in sorted(final.service_ids - cad.service_ids - hastus.service_ids - rail_services):
         report.add(
             "MRG104",
             "error",
@@ -1076,9 +1085,9 @@ def _audit_entity_provenance(cad: SourceFeed, hastus: SourceFeed, final: SourceF
         "final_routes_total": len(final_route_ids),
         "final_trips_traceable": len(final_trip_ids & (cad_trip_ids | hastus_trip_ids)),
         "final_trips_total": len(final_trip_ids),
-        "final_shapes_traceable": len(final.shape_ids & (cad.shape_ids | hastus.shape_ids)),
+        "final_shapes_traceable": len(final.shape_ids & (cad.shape_ids | hastus.shape_ids | rail_shapes)),
         "final_shapes_total": len(final.shape_ids),
-        "final_services_traceable": len(final.service_ids & (cad.service_ids | hastus.service_ids)),
+        "final_services_traceable": len(final.service_ids & (cad.service_ids | hastus.service_ids | rail_services)),
         "final_services_total": len(final.service_ids),
     }
 
@@ -1087,6 +1096,7 @@ def validate_exports(
     clevercad_path: str | Path,
     hastus_path: str | Path,
     final_path: str | Path | None = None,
+    rail_path: str | Path | None = None,
 ) -> ValidationReport:
     final_value = str(final_path).strip() if final_path is not None else ""
     if final_value:
@@ -1101,12 +1111,26 @@ def validate_exports(
     cad = _load_source(clevercad_path, "CleverCAD", report)
     hastus = _load_source(hastus_path, "HASTUS", report)
     final = _load_source(final_value, "Final merged GTFS", report) if final_value else None
-    loaded = [feed for feed in (cad, hastus, final) if feed]
+    rail = _load_source(rail_path, "HASTUS rail", report) if rail_path else None
+    loaded = [feed for feed in (cad, hastus, final, rail) if feed]
     try:
         report.stats["inputs"] = {
             feed.label: {"path": str(feed.path), "sha256": feed.sha256}
             for feed in loaded
         }
+        if rail:
+            from .rail import audit_rail
+            try:
+                report.stats['rail'] = audit_rail(str(rail.path),final_value,str(clevercad_path),str(hastus_path),report)
+            except (OSError,ValueError,KeyError) as exc:
+                report.stats['rail'] = {'status':'failed','message':str(exc),'routes':[]}
+                report.add('RAIL999','error','Rail validation','Rail inspection could not complete',str(exc))
+            rail_names = {row.get('route_short_name','').strip() for row in rail.routes}
+            for source in (cad,hastus):
+                if not source:continue
+                excluded={row.get('route_id') for row in source.routes if row.get('route_short_name','').strip() in rail_names}
+                source.routes=[row for row in source.routes if row.get('route_id') not in excluded]
+                source.trips=[row for row in source.trips if row.get('route_id') not in excluded]
         if cad and hastus:
             hastus_translation = _hastus_stop_translation(cad, hastus)
             cad_summaries = _trip_summaries(cad, {}, report)
@@ -1114,7 +1138,7 @@ def validate_exports(
             final_summaries = _trip_summaries(final, {}, report) if final else None
             _audit_stops(cad, hastus, final, report)
             if final:
-                _audit_entity_provenance(cad, hastus, final, report)
+                _audit_entity_provenance(cad, hastus, final, report, rail)
             if cad_summaries and hastus_summaries and (final_summaries or final is None):
                 _audit_trip_patterns(cad_summaries, hastus_summaries, final_summaries, report)
     finally:
@@ -1128,6 +1152,7 @@ def validate_merge(
     clevercad_path: str | Path,
     hastus_path: str | Path,
     final_path: str | Path | None = None,
+    rail_path: str | Path | None = None,
 ) -> ValidationReport:
     """Backward-compatible alias for the optional-final export audit."""
-    return validate_exports(clevercad_path, hastus_path, final_path)
+    return validate_exports(clevercad_path, hastus_path, final_path, rail_path)

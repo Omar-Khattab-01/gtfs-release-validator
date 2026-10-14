@@ -7,7 +7,22 @@ This local Windows application first reconciles the two source exports before th
 
 After the vendor produces the merged feed, a final merged/publication GTFS can be supplied as an optional third input for post-merge verification.
 
-All three archives are read-only and remain on the workstation.
+All supplied archives are read-only and remain on the workstation.
+
+### Separate HASTUS rail export
+
+The optional **HASTUS rail export ZIP** is independent of the bus sources. It
+can be opened alone, alongside the bus sources, or with a final merged GTFS.
+The **Rail variations & trips** tab displays every rail route, variation, trip,
+stop sequence, calendar and local shape plot. Rail is compared only with the
+final GTFS; without a final, it is explicitly marked **Not compared**.
+
+Final comparisons check missing trips and operating dates within the final
+publication window, ordered stops, times, trip/route/stop attributes and shape
+geometry. Both complete trip records remain inspectable. Renamed trip and
+shape IDs do not automatically indicate missing service. Rail routes appearing
+in either bus export are flagged separately and excluded from bus-pattern
+comparisons. No station-code-only matching is used for rail platforms.
 
 The interface also accepts **only a final ZIP**: leave both source paths empty
 and select **Validate & inspect**. The existing Python validator checks the file
@@ -39,8 +54,8 @@ evidence, shapes, and raw-table pages then use indexed lookups rather than
 repeatedly decompressing and scanning entire GTFS tables. The original ZIPs
 are never edited or unpacked into your project directory.
 
-With **Save indexes** enabled, all supplied feeds (both sources and the optional
-final) are saved automatically. SHA-256 content fingerprints and a schema version
+With **Save indexes** enabled, all supplied feeds (both bus sources, the optional
+final and the optional rail source) are saved automatically. SHA-256 content fingerprints and a schema version
 prevent reuse for changed feeds. Reopening after restarting reuses the saved
 database. Completed audits are also saved and reused on the same day when all
 feed fingerprints, validation settings, agency reference, engine files and code

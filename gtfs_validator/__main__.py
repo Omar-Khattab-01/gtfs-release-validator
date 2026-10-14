@@ -27,6 +27,7 @@ def main() -> None:
     audit.add_argument("hastus_zip")
     audit.add_argument("final_zip", nargs="?", help="optional final merged GTFS ZIP")
     audit.add_argument("--output", help="write the JSON report to this path")
+    audit.add_argument('--rail',help='optional separate HASTUS rail ZIP (compared only with final)')
 
     args = parser.parse_args()
     if args.command in {None, "serve"}:
@@ -47,7 +48,7 @@ def main() -> None:
             print(rendered)
         sys.exit(2 if report.decision == "BLOCKED" else 1 if report.decision == "NEEDS REVIEW" else 0)
     if args.command == "audit":
-        report = validate_merge(args.clevercad_zip, args.hastus_zip, args.final_zip)
+        report = validate_merge(args.clevercad_zip, args.hastus_zip, args.final_zip, args.rail)
         rendered = json.dumps(report.to_dict(), ensure_ascii=False, indent=2)
         if args.output:
             with open(args.output, "w", encoding="utf-8") as stream:
