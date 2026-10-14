@@ -198,6 +198,9 @@ button:hover { background: var(--red-dark); }
 .comparison-table { overflow: auto; background: white; border: 1px solid var(--line); }
 .comparison-table table { min-width: 920px; font-size: 11px; }
 .comparison-table tr.different-stop, .comparison-table tr.clevercad-only, .comparison-table tr.hastus-only { background: #fff0d9; }
+.comparison-table tr.sequence-filter-highlight > td { background: #ffe2a3; border-top: 2px solid #9c5c00; border-bottom: 2px solid #9c5c00; }
+.sequence-focus-label { color: #754300; font-weight: 700; }
+.mismatch-evidence.sequence-filter-highlight { border: 2px solid #9c5c00; background: #fff3d6; }
 .comparison-table tr.schedule-difference { background: #fff8e9; }
 .comparison-table td { padding: 9px 10px; }
 .comparison-table td:nth-child(3) { min-width: 0; }

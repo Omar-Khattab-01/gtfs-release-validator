@@ -632,26 +632,27 @@ function renderCoordinateMap(cad, hastus, distance) {
 }
 
 function renderTripDetail(detail) {
-  const differences = (detail.differences || []).filter(row => matchesSequenceFilter(row.mismatch_positions));
+  const differences = detail.differences || [];
   const context = [detail.route_short_name && `Route ${detail.route_short_name}`, detail.headsign && `To ${detail.headsign}`, detail.first_time && `${detail.first_time}–${detail.last_time}`, detail.clevercad_variation_id && `${detail.clevercad_variation_id} · shape ${detail.clevercad_shape_id || '—'}`, detail.hastus_variation_id && `${detail.hastus_variation_id} · shape ${detail.hastus_shape_id || '—'}`, `${differences.length} explained differences`].filter(Boolean);
   const statusLabels = {match:'Match', different_stop:'Different stops', clevercad_only:'Only in CleverCAD', hastus_only:'Only in HASTUS', schedule_difference:'Time / boarding rules'};
   const rows = (detail.alignment || []).map((row, index) => {
-    if (!matchesSequenceFilter(row.mismatch_positions)) return '';
+    const selectedMismatch = Boolean(sequenceFilter.value) && row.status !== 'match' && matchesSequenceFilter(row.mismatch_positions);
     const cad = row.clevercad || {};
     const hastus = row.hastus || {};
     const changedFields = row.fields?.length ? `<br><small>${escapeHtml(row.fields.join(', ').replaceAll('_',' '))}</small>` : '';
     const final = row.final || {};
     const finalCell = detail.final_supplied ? `<td><strong>${escapeHtml(final.stop_name || '—')}</strong><br>${escapeHtml(final.departure_time || final.arrival_time || '—')}<br><small>stop ${escapeHtml(final.source_stop_id || '—')} · ${escapeHtml(row.final_source || 'No final counterpart')}</small></td>` : '';
-    return `<tr class="${escapeHtml(row.status.replaceAll('_','-'))}"><td>${index + 1}</td><td class="status-cell"><span class="diff-badge ${escapeHtml(row.status.replaceAll('_','-'))}">${escapeHtml(statusLabels[row.status] || row.status)}</span>${changedFields}</td><td>${escapeHtml(cad.sequence || '—')}</td><td>${escapeHtml(cad.departure_time || cad.arrival_time || '—')}</td><td><strong>${escapeHtml(cad.stop_name || '—')}</strong><br><small>source ${escapeHtml(cad.source_stop_id || '—')} · mapped ${escapeHtml(cad.canonical_stop_id || '—')}</small></td><td>${escapeHtml(hastus.sequence || '—')}</td><td>${escapeHtml(hastus.departure_time || hastus.arrival_time || '—')}</td><td><strong>${escapeHtml(hastus.stop_name || '—')}</strong><br><small>source ${escapeHtml(hastus.source_stop_id || '—')} · mapped ${escapeHtml(hastus.canonical_stop_id || '—')}</small></td>${finalCell}</tr>`;
+    return `<tr class="${escapeHtml(row.status.replaceAll('_','-'))}${selectedMismatch ? ' sequence-filter-highlight' : ''}"><td>${index + 1}</td><td class="status-cell"><span class="diff-badge ${escapeHtml(row.status.replaceAll('_','-'))}">${escapeHtml(statusLabels[row.status] || row.status)}</span>${changedFields}${selectedMismatch ? '<br><small class="sequence-focus-label">Selected mismatch</small>' : ''}</td><td>${escapeHtml(cad.sequence || '—')}</td><td>${escapeHtml(cad.departure_time || cad.arrival_time || '—')}</td><td><strong>${escapeHtml(cad.stop_name || '—')}</strong><br><small>source ${escapeHtml(cad.source_stop_id || '—')} · mapped ${escapeHtml(cad.canonical_stop_id || '—')}</small></td><td>${escapeHtml(hastus.sequence || '—')}</td><td>${escapeHtml(hastus.departure_time || hastus.arrival_time || '—')}</td><td><strong>${escapeHtml(hastus.stop_name || '—')}</strong><br><small>source ${escapeHtml(hastus.source_stop_id || '—')} · mapped ${escapeHtml(hastus.canonical_stop_id || '—')}</small></td>${finalCell}</tr>`;
   }).join('');
   const evidence = differences.map((row, index) => {
+    const selectedMismatch = Boolean(sequenceFilter.value) && matchesSequenceFilter(row.mismatch_positions);
     const cad = row.clevercad;
     const hastus = row.hastus;
     const cadName = cad?.stop_name || 'No CleverCAD stop';
     const hastusName = hastus?.stop_name || 'No HASTUS stop';
-    return `<details class="mismatch-evidence"><summary>${index + 1}. ${escapeHtml(statusLabels[row.status] || row.status)} · ${escapeHtml(cadName)} ↔ ${escapeHtml(hastusName)}</summary><div class="source-grid">${sourceCard('CleverCAD complete stop record', cad?.source_record || {}, '')}${sourceCard('HASTUS complete stop record', hastus?.source_record || {}, 'hastus')}</div></details>`;
+    return `<details class="mismatch-evidence${selectedMismatch ? ' sequence-filter-highlight' : ''}"><summary>${index + 1}. ${escapeHtml(statusLabels[row.status] || row.status)} · ${escapeHtml(cadName)} ↔ ${escapeHtml(hastusName)}</summary><div class="source-grid">${sourceCard('CleverCAD complete stop record', cad?.source_record || {}, '')}${sourceCard('HASTUS complete stop record', hastus?.source_record || {}, 'hastus')}</div></details>`;
   }).join('');
-  return `<div class="trip-context">${context.map(value=>`<span>${escapeHtml(value)}</span>`).join('')}</div><div class="comparison-table"><table><thead><tr><th>Aligned row</th><th>Result</th><th>CAD #</th><th>CAD time</th><th>CleverCAD stop</th><th>HASTUS #</th><th>HASTUS time</th><th>HASTUS stop</th>${detail.final_supplied ? '<th>Final merged GTFS · source chosen</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div><div class="mismatch-stack"><h3>Mismatch evidence</h3><p class="quiet">Open any difference to see every available stops.txt field from both exports.</p>${evidence || '<p>No sequence differences were found.</p>'}</div>`;
+  return `<p class="quiet">Full stop sequence shown. ${sequenceFilter.value ? 'Selected mismatch locations are highlighted; other differences remain visible.' : 'All mismatches are highlighted.'}</p><div class="trip-context">${context.map(value=>`<span>${escapeHtml(value)}</span>`).join('')}</div><div class="comparison-table"><table><thead><tr><th>Aligned row</th><th>Result</th><th>CAD #</th><th>CAD time</th><th>CleverCAD stop</th><th>HASTUS #</th><th>HASTUS time</th><th>HASTUS stop</th>${detail.final_supplied ? '<th>Final merged GTFS · source chosen</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div><div class="mismatch-stack"><h3>Mismatch evidence</h3><p class="quiet">Open any difference to see every available stops.txt field from both exports.</p>${evidence || '<p>No sequence differences were found.</p>'}</div>`;
 }
 
 function csvCell(value) {

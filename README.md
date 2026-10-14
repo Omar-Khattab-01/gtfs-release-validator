@@ -86,7 +86,10 @@ configuration.
 
 The **Source stop-sequence mismatch** filter is available in Route health and
 the Investigation centre. Choose any sequence mismatch, beginning, middle or
-end. It filters routes, paired variations, findings and their aligned evidence.
+end. It filters routes, paired variations and findings. Opened variations and
+finding details always show the full trip/stop sequence, with the selected
+mismatch locations highlighted. Other differences and all stop evidence remain
+visible for context.
 Beginning/end refer to leading/trailing differing blocks; middle changes occur
 between matched stops. Insertions do not make all later rows mismatches.
 Multiple differing sections can put one variation in several filters.
