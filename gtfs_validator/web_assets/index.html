@@ -100,6 +100,8 @@
         </div>
         <div class="route-legend"><span><i class="route-dot healthy"></i>All paired patterns match</span><span><i class="route-dot issues"></i>Pattern mismatches found</span><span><i class="route-dot ambiguous"></i>Pairing needs review</span><span><i class="route-dot not-comparable"></i>Source-only</span></div>
         <label>Source stop-sequence mismatch<select id="route-sequence-filter"><option value="">All routes and variations</option><option value="any">Any stop-sequence mismatch</option><option value="first">First stop / beginning</option><option value="middle">Middle stops</option><option value="last">Last stop / end</option></select></label>
+        <label>Source presence<select id="source-presence-filter"><option value="">All source patterns</option><option value="clevercad">Missing in CleverCAD</option><option value="hastus">Missing in HASTUS</option></select></label>
+        <p class="quiet">Missing means no sufficiently similar counterpart was paired in that source—not proof that the service is absent. This filter narrows route cards, variation tabs and related trip findings; stop mapping and rail remain separate.</p>
         <p class="quiet">Filters compare paired CleverCAD ↔ HASTUS stop patterns, not times or stop attributes. Beginning/end changes are identified against matched stops; a variation can appear in multiple filters. Source-only patterns are not classified as mismatches.</p>
         <div class="route-grid" id="route-grid"></div>
         <div class="active-route hidden" id="active-route"><span id="active-route-label"></span><button type="button" class="text-button" id="clear-route">Show all routes</button></div>

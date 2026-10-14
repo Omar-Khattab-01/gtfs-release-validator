@@ -38,6 +38,10 @@ mean stop-pattern equivalence, not proof of vendor intent or schedule equality.
 
 Source-only variations open their own stop sequence. The Local feed viewer can
 inspect all their trips and shapes, even when no counterpart exists.
+The **Source presence** filter offers **Missing in CleverCAD** and **Missing in
+HASTUS**, narrowing route cards, variation tabs and related trip findings.
+These labels mean no suitable counterpart was paired, not confirmed missing
+service. Stop mapping and the separate rail comparison are unaffected.
 
 Your [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) is bundled at
 `http://127.0.0.1:8765/file-viewer/`, accessible from the Local feed viewer.
