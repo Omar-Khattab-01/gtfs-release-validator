@@ -28,6 +28,8 @@ from .input_paths import normalize_path
 from .rail import audit_rail, trip_evidence
 from .models import ValidationReport
 from .missing_reports import missing_report, variation_evidence, export_excel, printable_report
+from .inspection import add_inspections
+from .source_final import compare_source_final
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -126,12 +128,12 @@ def _run_job(job: Job) -> None:
         if job.clevercad_path and job.hastus_path:
             report = validate_merge(job.clevercad_path,job.hastus_path,job.final_path,rail_path=job.rail_path) if job.rail_path else validate_merge(job.clevercad_path,job.hastus_path,job.final_path)
         else:
-            report = validate_feed(job.final_path) if job.final_path else ValidationReport(source_path=job.rail_path,profile='rail-source-preflight')
+            report = validate_feed(job.final_path) if job.final_path else ValidationReport(source_path=job.hastus_path or job.clevercad_path or job.rail_path,profile='source-preflight')
             if job.final_path:
                 report.stats['final_technical_findings']=[item.to_dict() for item in report.findings]
             if job.rail_path:
                 try:
-                    report.stats['rail']=audit_rail(job.rail_path,job.final_path,'','',report)
+                    report.stats['rail']=audit_rail(job.rail_path,job.final_path,job.clevercad_path,job.hastus_path,report)
                 except (OSError,ValueError,KeyError) as exc:
                     report.stats['rail']={'status':'failed','message':str(exc),'routes':[]}
                     report.add('RAIL999','error','Rail validation','Rail inspection could not complete',str(exc))
@@ -139,6 +141,24 @@ def _run_job(job: Job) -> None:
             report.stats.setdefault('inputs',{})['Final merged GTFS']={"path":job.final_path,"sha256":report.sha256}
         if index_errors:
             report.stats["browse_index_errors"] = index_errors
+        def inspection_progress(message):
+            with job.lock:job.progress=message
+        final_snapshot={'files':dict(report.files),'sha256':report.sha256,'archive_size':report.archive_size,
+                        'findings':report.stats.get('final_technical_findings',[])} if job.final_path else None
+        add_inspections(report,{'cad':job.clevercad_path,'hastus':job.hastus_path,'rail':job.rail_path,'final':job.final_path},final_snapshot,inspection_progress)
+        if job.final_path and not (job.clevercad_path and job.hastus_path):
+            for source,path in (('cad',job.clevercad_path),('hastus',job.hastus_path)):
+                if not path:continue
+                inspection_progress(f'Comparing {source} against final GTFS')
+                try:
+                    comparison=compare_source_final(path,job.final_path)
+                    report.stats.setdefault('source_final',{})[source]=comparison
+                    for route in comparison['routes']:
+                        if route['status']=='needs_review':report.add('INS020','warning','Source → final','Source route differs from final GTFS',
+                            f"Route {route['route_short_name']}: {route['counts']}",context={'inspection_source':source,'route_short_name':route['route_short_name']})
+                except (OSError,ValueError,KeyError,sqlite3.Error) as exc:
+                    report.stats.setdefault('source_final',{})[source]={'status':'failed','message':str(exc),'routes':[]}
+                    report.add('INS021','error','Source → final','Source comparison could not complete',str(exc),context={'inspection_source':source})
         if job.final_path:
             technical = report.stats.pop("final_technical_findings", None)
             if technical is None:
@@ -190,7 +210,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.11.2"
+    server_version = "GTFSValidator/0.12.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -248,6 +268,21 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown run"})
             if len(parts) == 3:
                 return self._json(HTTPStatus.OK, job.public())
+            if len(parts)==4 and parts[3] in {'inspection-report.json','inspection-row'}:
+                query=parse_qs(parsed_url.query)
+                source=str((query.get('source') or [''])[0]);path={'cad':job.clevercad_path,'hastus':job.hastus_path,'rail':job.rail_path,'final':job.final_path}.get(source)
+                if not path:return self._json(HTTPStatus.BAD_REQUEST,{'error':'This export was not supplied'})
+                if parts[3]=='inspection-report.json':
+                    inspection=(job.report or {}).get('stats',{}).get('individual_feeds',{}).get(source)
+                    if inspection is None:return self._json(HTTPStatus.CONFLICT,{'error':'Inspection is not ready'})
+                    return self._download(json.dumps(inspection,ensure_ascii=False,indent=2).encode(),f'{source}-inspection-{job.id}.json','application/json; charset=utf-8')
+                try:
+                    name=str((query.get('file') or [''])[0]);row=int((query.get('row') or ['0'])[0])
+                    if row<2:raise ValueError('CSV record row must be at least 2')
+                    page=get_index(path).page(name,row-2,1)
+                    if not page['rows']:raise ValueError('CSV record row is outside the file')
+                    return self._json(HTTPStatus.OK,{'file':name,'row':row,'columns':page['columns'],'record':page['rows'][0]})
+                except (OSError,ValueError,KeyError,sqlite3.Error) as exc:return self._json(HTTPStatus.UNPROCESSABLE_ENTITY,{'error':str(exc)})
             if len(parts)==4 and parts[3] in {'missing-report','missing-detail','missing-report.xlsx','missing-report.html'}:
                 payload=job.public()
                 if payload.get('report') is None:return self._json(HTTPStatus.CONFLICT,{'error':'Report is not ready'})
@@ -432,8 +467,8 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         hastus_path = normalize_path(payload.get("hastus_path", ""))
         final_path = normalize_path(payload.get("final_path", ""))
         rail_path = normalize_path(payload.get('rail_path',''))
-        if bool(clevercad_path) != bool(hastus_path) or (not clevercad_path and not final_path and not rail_path):
-            return self._json(HTTPStatus.BAD_REQUEST, {"error": "Supply both bus sources, a rail export, or a final GTFS ZIP"})
+        if not any((clevercad_path,hastus_path,final_path,rail_path)):
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": "Supply at least one export to inspect"})
 
         job = Job(
             id=uuid.uuid4().hex[:12],

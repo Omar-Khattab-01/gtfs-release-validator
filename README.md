@@ -1,6 +1,41 @@
 # OC Transpo GTFS Merge Auditor
 
-This local Windows application first reconciles the two source exports before they are submitted to the vendor:
+This local Windows application supports the full export workflow, starting with
+any single ZIP. Supply HASTUS bus first, add CleverCAD when it becomes available,
+and add HASTUS rail and the final merged feed when ready. Every input is optional;
+at least one is required. Nothing is uploaded or modified.
+
+### Individual feed inspection
+
+The **Individual feeds** tab checks every supplied export independently:
+
+- **Overview:** input identity, inventory, technical findings, agency review
+  items and unexpected content (including rail in a bus export without needing
+  a separate rail file). Unsupplied inputs say **Not supplied**.
+- **File health:** every ZIP member, row and column counts, coverage of checks,
+  findings and a link to the searchable raw table. Additional tables remain
+  browsable even when no table-specific validation rules are implemented.
+- **Route health:** trips, shapes, directions and route-specific findings;
+  open every variation and trip in the indexed local viewer. Feed-level findings
+  remain separate, so a route without assigned findings is not a full-feed pass.
+- **Findings:** search by rule/file/trip, filter by level, open the affected
+  CSV record in a popup, then jump to the full file or route. Each feed has its
+  own downloadable inspection JSON.
+- **Source → final:** when only one bus source is supplied, compare its trips
+  with the optional final, including operating-date coverage, ordered stops,
+  times/boarding rules, trip attributes and shape geometry. Rail uses its
+  dedicated comparison. When both bus sources exist, use the three-column
+  variation comparison. Extra final-only service is not presumed erroneous
+  without the missing source or an expected-service baseline.
+
+Source inspection does not enforce final publication requirements for
+`feed_info.txt` or shapes. Missing optional headsign/shape values are agency
+review items, not universal required-field errors. Referenced records and
+incomplete trips/geometry are still checked. Standards coverage is focused on
+the core schedule tables; this is not a replacement for the optional canonical
+MobilityData validator on the final feed. Source checks need no Java.
+
+Both bus inputs are needed **only for comparison**, not for inspection:
 
 1. CleverCAD export (`CW-…zip`)
 2. HASTUS export (`GTFS_…zip`)

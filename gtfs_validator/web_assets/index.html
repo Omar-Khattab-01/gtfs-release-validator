@@ -21,8 +21,8 @@
     <section class="hero">
       <div>
         <p class="kicker">Pre-publication control</p>
-        <h2>Validate the artifact riders will actually receive.</h2>
-      <p class="lede">Check CleverCAD against HASTUS before vendor submission. Add the final merged GTFS later when you want to verify what the vendor produced.</p>
+        <h2>Inspect each export. Verify every merge.</h2>
+      <p class="lede">Start with HASTUS bus, rail, or any single export. Add CAD for bus comparison, then the final merged GTFS for publication checks.</p>
       </div>
       <div class="scope-card">
         <span>Primary gate</span>
@@ -33,13 +33,13 @@
 
     <section class="panel setup-panel" id="setup-panel">
       <div class="section-heading">
-        <div><span class="step">01</span><h3>Select source exports</h3></div>
-        <span class="quiet">Bus sources, optional rail, or final ZIP only</span>
+          <div><span class="step">01</span><h3>Select exports to inspect</h3></div>
+        <span class="quiet">Start with any one export · add the others when available</span>
       </div>
       <form id="run-form">
         <div class="input-stack">
           <label for="clevercad-path"><span class="label-title">CleverCAD export ZIP</span><input id="clevercad-path" name="clevercad_path" type="text" autocomplete="off" spellcheck="false" placeholder="C:\GTFS\CW-EXPORT.zip"></label>
-          <label for="hastus-path"><span class="label-title">HASTUS export ZIP</span><input id="hastus-path" name="hastus_path" type="text" autocomplete="off" spellcheck="false" placeholder="C:\GTFS\HASTUS-EXPORT.zip"></label>
+          <label for="hastus-path"><span class="label-title">HASTUS bus export ZIP</span><input id="hastus-path" name="hastus_path" type="text" autocomplete="off" spellcheck="false" placeholder="C:\GTFS\HASTUS-EXPORT.zip"></label>
           <label for="final-path"><span class="label-title">Final merged GTFS ZIP <span class="optional">Optional</span></span><input id="final-path" name="final_path" type="text" autocomplete="off" spellcheck="false" placeholder="Add later to verify the vendor output"></label>
           <label for="rail-path"><span class="label-title">HASTUS rail export ZIP <span class="optional">Optional · separate source</span></span><input id="rail-path" name="rail_path" type="text" autocomplete="off" spellcheck="false" placeholder="Separate rail ZIP; compared only with final GTFS"></label>
         </div>
@@ -55,7 +55,7 @@
           <button type="button" id="cache-refresh">View saved-index storage</button>
           <button type="button" id="cache-clear">Remove unused saved indexes</button><p id="cache-summary" aria-live="polite"></p>
         </fieldset>
-        <div class="submit-row"><p class="field-help">Use full local paths. Supply both bus sources for comparison. The separate rail ZIP can be inspected alone and is compared only with an optional final ZIP. A final ZIP alone is also supported.</p><button type="submit" id="run-button">Validate &amp; inspect</button></div>
+        <div class="submit-row"><p class="field-help">Supply at least one ZIP. Every supplied export is checked and browsable on its own. CAD ↔ HASTUS comparison becomes available when both are supplied; add the final ZIP later for merge review. Rail remains a separate source.</p><button type="submit" id="run-button">Validate &amp; inspect</button></div>
       </form>
     </section>
 
@@ -73,7 +73,8 @@
       <div class="metric-grid" id="metrics"></div>
 
       <nav class="workspace-tabs" aria-label="Audit views">
-        <button type="button" class="workspace-tab active" data-view="routes" aria-selected="true">Route variations</button>
+        <button type="button" class="workspace-tab active" data-view="inspection" aria-selected="true">Individual feeds</button>
+        <button type="button" class="workspace-tab" data-view="routes" aria-selected="false">Route variations</button>
         <button type="button" class="workspace-tab" data-view="missing-hastus" aria-selected="false">Missing in HASTUS</button>
         <button type="button" class="workspace-tab" data-view="missing-cad" aria-selected="false">Missing in CAD</button>
         <button type="button" class="workspace-tab" data-view="stops" aria-selected="false">Stop mapping &amp; mismatches</button>
@@ -81,6 +82,12 @@
         <button type="button" class="workspace-tab" data-view="final" aria-selected="false">Final GTFS validation</button>
         <button type="button" class="workspace-tab" data-view="rail" aria-selected="false">Rail variations &amp; trips</button>
       </nav>
+      <section class="panel" id="inspection-view">
+        <h3>Individual feed inspection</h3><p id="inspection-workflow"></p>
+        <div id="inspection-sources" class="route-grid"></div>
+        <div class="missing-toolbar"><label>Inspection view<select id="inspection-section"><option value="overview">Overview</option><option value="files">File health</option><option value="routes">Route health</option><option value="findings">Findings</option><option value="comparison">Source → final</option></select></label><label>Search this feed<input type="search" id="inspection-search" placeholder="Route, file, rule, trip, message"></label><label>Finding level<select id="inspection-level"><option value="">All levels</option><option value="blocker">Blocker</option><option value="error">Error</option><option value="warning">Warning</option><option value="info">Info</option></select></label></div>
+        <div id="inspection-content" aria-live="polite"></div>
+      </section>
       <section class="panel hidden missing-report-view" id="missing-hastus-view" data-missing="hastus">
         <h3>Missing in HASTUS</h3>
         <div class="missing-toolbar"><label>Find route or variation<input type="search" id="missing-hastus-search" placeholder="Route, destination, shape or variation"></label><a class="button secondary" data-export-missing="hastus" data-format="xlsx" download>Export Excel</a><a class="button secondary" data-export-missing="hastus" data-format="html" target="_blank" rel="noopener">PDF / print report</a></div>
@@ -105,7 +112,7 @@
         <div id="viewer-content" aria-live="polite"></div>
       </section>
 
-      <section class="panel route-panel" id="route-view">
+      <section class="panel route-panel hidden" id="route-view">
         <div class="section-heading compact">
           <div><span class="step">02</span><h3>Route health</h3></div>
           <div class="route-heading-actions"><span class="quiet" id="route-summary">Select a route to isolate its trip findings</span><label>Sort routes<select id="route-sort"><option value="number">Route number</option><option value="attention">Needs attention</option><option value="variations">Most variations</option></select></label></div>
@@ -191,8 +198,10 @@
     <div class="drawer-header"><div><p class="eyebrow">Missing-source issue evidence</p><h2 id="missing-dialog-title">Variation details</h2></div><button type="button" id="missing-dialog-close" aria-label="Close variation and return to report">×</button></div>
     <div id="missing-dialog-body"></div>
   </dialog>
-  <footer><span>GTFS Merge Auditor 0.11.2</span><span>Bound to localhost · no network services</span></footer>
+  <dialog id="inspection-dialog" aria-labelledby="inspection-dialog-title"><div class="drawer-header"><h2 id="inspection-dialog-title">Feed evidence</h2><button type="button" id="inspection-dialog-close" aria-label="Close feed evidence">×</button></div><div id="inspection-dialog-body"></div></dialog>
+  <footer><span>GTFS Merge Auditor 0.12.0</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
   <script src="/assets/missing-reports.js" defer></script>
+  <script src="/assets/inspection.js" defer></script>
 </body>
 </html>

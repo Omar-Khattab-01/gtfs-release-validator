@@ -2,6 +2,9 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 import hashlib
+import csv
+import sqlite3
+import zipfile
 from .feed_index import get_index
 from .engine import validate_feed
 from .details import _translation, _align_sequences
@@ -75,7 +78,7 @@ def _models(index,route_ids,translation):
 
 def audit_rail(rail_path,final_path,cad_path,bus_path,report):
     source = get_index(rail_path)
-    source_checks = validate_feed(rail_path)
+    source_checks = validate_feed(rail_path,profile='source-inspection')
     for finding in source_checks.findings:
         report.add('RAIL001',finding.severity,'Rail validation',finding.title,finding.message,
                    file='HASTUS rail:'+str(finding.file or ''),row=finding.row,key=finding.key,
@@ -89,7 +92,10 @@ def audit_rail(rail_path,final_path,cad_path,bus_path,report):
     contamination = []
     for label,path in [('CleverCAD',cad_path),('HASTUS bus',bus_path)]:
         if not path:continue
-        other = get_index(path)
+        try:other = get_index(path)
+        except (OSError,ValueError,KeyError,UnicodeError,csv.Error,sqlite3.Error,zipfile.BadZipFile,RuntimeError) as exc:
+            report.add('RAIL021','warning','Rail isolation','Bus-source overlap check unavailable',f'{label}: {exc}')
+            continue
         for route in other.small_tables.get('routes.txt',[]):
             if route.get('route_short_name','').strip() in route_names:
                 item={'source':label,'route':route,'trip_count':sum(trip.get('route_id')==route.get('route_id') for trip in other.small_tables.get('trips.txt',[]))}

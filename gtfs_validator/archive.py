@@ -217,10 +217,10 @@ def inspect_archive(path: Path, report: ValidationReport) -> zipfile.ZipFile | N
     for expected in sorted(AGENCY_EXPECTED_FILES - name_set):
         report.add(
             "PKG014",
-            "error",
+            "info" if report.profile == 'source-inspection' else "error",
             "Packaging",
-            "Expected agency file is missing",
-            f"{expected} is expected in the OC Transpo release profile.",
+            "Optional source file not supplied" if report.profile == 'source-inspection' else "Expected agency file is missing",
+            f"{expected} is checked when supplied; publication expectations apply to the final feed." if report.profile == 'source-inspection' else f"{expected} is expected in the OC Transpo release profile.",
             file=expected,
         )
 

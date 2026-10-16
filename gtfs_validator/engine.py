@@ -92,7 +92,10 @@ def _reader(
             f"Duplicate columns: {', '.join(duplicates)}.",
             file=file_name,
         )
-    missing = sorted(REQUIRED_COLUMNS.get(file_name, set()) - set(normalized))
+    required = REQUIRED_COLUMNS.get(file_name, set())
+    if report.profile == 'source-inspection' and file_name == 'routes.txt':
+        required = required - {'route_short_name','route_long_name'}
+    missing = sorted(required - set(normalized))
     for column in missing:
         report.add(
             "CSV005",
@@ -201,9 +204,10 @@ def _load_table(
         rows.append(row)
     report.files.setdefault(file_name, {})["rows"] = len(rows)
     if not rows:
+        optional_empty = report.profile == 'source-inspection' and file_name == 'calendar_dates.txt' and 'calendar.txt' in archive.namelist()
         report.add(
             "CSV007",
-            "blocker",
+            "info" if optional_empty else "blocker",
             "Structure",
             "GTFS file has no data rows",
             "The file contains a header but no records.",
@@ -263,6 +267,10 @@ def _check_stops(
                     observed=value,
                 )
         parent = row.get("parent_station", "").strip()
+        expected_parent_type = '0' if location_type == '4' else '1'
+        if not parent and location_type in {'2','3','4'}:
+            report.add('REL012','error','Relationships','Required parent is missing',
+                       f'location_type={location_type} requires parent_station.',file='stops.txt',row=row_number,key=stop_id)
         if parent and parent not in stop_ids:
             report.add(
                 "REL003",
@@ -275,18 +283,18 @@ def _check_stops(
                 key=stop_id,
                 observed=parent,
             )
-        elif parent and stop_types.get(parent) != "1":
+        elif parent and stop_types.get(parent) != expected_parent_type:
             report.add(
                 "REL011",
                 "error",
                 "Relationships",
                 "Parent station has the wrong location type",
-                f"parent_station {parent!r} must reference a location_type=1 station.",
+                f"parent_station {parent!r} must reference location_type={expected_parent_type}.",
                 file="stops.txt",
                 row=row_number,
                 key=stop_id,
                 observed=stop_types.get(parent, ""),
-                expected="1",
+                expected=expected_parent_type,
             )
         if location_type == "1" and parent:
             report.add(

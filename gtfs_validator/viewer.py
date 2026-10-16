@@ -6,6 +6,11 @@ from .details import _rows, _stop_index, _trip_stop_times
 from .feed_index import get_index
 
 
+def _sequence(value):
+    try:return (0,int(value))
+    except (TypeError,ValueError):return (1,str(value or ''))
+
+
 def inventory(path: str) -> dict:
     routes = _rows(path, "routes.txt")
     trips = _rows(path, "trips.txt")
@@ -24,7 +29,7 @@ def route_detail(path: str, route_id: str) -> dict:
         times[row["trip_id"]].append(row)
     groups = defaultdict(list)
     for trip in trips:
-        rows = sorted(times[trip["trip_id"]], key=lambda row: int(row.get("stop_sequence") or 0))
+        rows = sorted(times[trip["trip_id"]], key=lambda row: _sequence(row.get("stop_sequence")))
         trip = {**trip, "first_time": rows[0].get("departure_time", "") if rows else "", "last_time": rows[-1].get("arrival_time", "") if rows else "", "stop_count": len(rows)}
         groups[(trip.get("direction_id", ""), tuple(row.get("stop_id", "") for row in rows), trip.get("shape_id", ""))].append(trip)
     variations = [{"variation_id": f"V{index}", "direction_id": key[0], "stop_count": len(key[1]), "trip_count": len(items), "shape_ids": sorted({item.get("shape_id", "") for item in items}), "trips": sorted(items, key=lambda item: (item["first_time"], item["trip_id"]))} for index, (key, items) in enumerate(groups.items(), 1)]
@@ -41,7 +46,7 @@ def trip_detail(path: str, trip_id: str) -> dict:
     shape = []
     if "shapes.txt" in index.columns and trip.get("shape_id"):
         shape = index.lookup("shapes.txt", trip["shape_id"])
-    shape.sort(key=lambda row: int(row.get("shape_pt_sequence") or 0))
+    shape.sort(key=lambda row: _sequence(row.get("shape_pt_sequence")))
     return {"trip": trip, "stops": stops, "shape": shape}
 
 

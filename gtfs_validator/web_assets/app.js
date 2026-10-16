@@ -184,7 +184,7 @@ function renderFinalValidation(payload) {
   document.querySelector('#index-summary').textContent = (payload.index_status || []).map(item => `${item.source}: ${item.status}${item.warning ? ' — '+item.warning : ''}`).join(' · ') + ' · ' + (payload.audit_cache_status || '');
   const target = document.querySelector('#final-content');
   const validation = payload.final_validation;
-  if (!validation) { target.textContent = 'No final merged GTFS supplied. Source comparison is available in the other tabs.'; return; }
+  if (!validation) { target.textContent = 'Final merged GTFS: Not supplied. Inspect each supplied export in Individual feeds.'; return; }
   const counts = data => Object.entries(data.counts || {}).map(([key,value]) => `${value} ${key.toLowerCase()}`).join(' · ');
   const state = (title, data) => `<h3>${title}</h3><p>${escapeHtml(data.status)} · ${escapeHtml(counts(data))}</p>${data.message ? `<pre>${escapeHtml(data.message)}</pre>` : ''}`;
   const rowButton = (file,row,field='') => file && Number.isInteger(Number(row)) && Number(row)>=2 ? ` <button class="final-evidence" data-file="${escapeHtml(file)}" data-row="${row}" data-field="${escapeHtml(field)}">Inspect ${escapeHtml(file)} CSV row ${row}</button>` : '';
@@ -286,7 +286,9 @@ function renderReport(report, id) {
   results.classList.remove('hidden');
   const strip = document.querySelector('#decision-strip');
   strip.className = 'decision-strip ' + (report.decision === 'BLOCKED' ? 'blocked' : report.decision.startsWith('ELIGIBLE') ? 'approved' : '');
-  document.querySelector('#decision').textContent = report.decision;
+  const sourceOnly=report.stats?.workflow?.final==='not_supplied';
+  document.querySelector('#decision-strip .eyebrow').textContent=sourceOnly ? 'Inspection result' : 'Release decision';
+  document.querySelector('#decision').textContent = sourceOnly && report.decision.startsWith('ELIGIBLE') ? 'NO BLOCKING FINDINGS' : report.decision;
   document.querySelector('#source-name').textContent = report.source_path;
   document.querySelector('#hash').textContent = report.sha256 ? `Final SHA-256 ${report.sha256}` : 'Source archive hashes recorded in the exported report';
   document.querySelector('#csv-link').href = `/api/runs/${id}/findings.csv`;
@@ -298,6 +300,7 @@ function renderReport(report, id) {
   categoryFilter.innerHTML = '<option value="">All categories</option>' + categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
   renderRouteHealth(report.stats?.trip_reconciliation?.route_health || []);
   renderMissingReports();
+  renderIndividualFeeds(report);
   renderStopMapping(report.stats?.stop_crosswalk || {});
   renderRail(report.stats?.rail);
   renderIssueGroups();
@@ -594,7 +597,7 @@ function renderInventory(report) {
 
 function renderPackaging(report) {
   const files = Object.entries(report.files);
-  document.querySelector('#packaging').innerHTML = ['oc-transpo-source-preflight','rail-source-preflight'].includes(report.profile)
+  document.querySelector('#packaging').innerHTML = report.stats?.workflow?.final === 'not_supplied' || ['oc-transpo-source-preflight','rail-source-preflight','source-preflight'].includes(report.profile)
     ? '<div class="package-row"><span>Final merged GTFS</span><strong>Not supplied</strong></div><p class="field-help">Final artifact and permission checks were skipped. Add the merged ZIP after the vendor produces it.</p>'
     : `<div class="package-row"><span>Final archive size</span><strong>${formatBytes(report.archive_size)}</strong></div><div class="package-row"><span>Members inspected</span><strong>${files.length}</strong></div><div class="package-row"><span>Members stored as 0644</span><strong>${files.filter(([,v]) => v.stored_mode === '644').length} / ${files.length}</strong></div><div class="package-row"><span>System extraction tested</span><strong>${report.stats.extracted_permissions ? 'Yes' : 'Unavailable'}</strong></div>`;
 }
@@ -602,6 +605,14 @@ function renderPackaging(report) {
 async function openDetail(index) {
   const finding = activeFindings.find(item => item._index === index);
   if (!finding) return;
+  if (finding.context?.inspection_source) {
+    document.querySelector('.workspace-tab[data-view="inspection"]').click();
+    inspectionSource=finding.context.inspection_source;
+    document.querySelector('#inspection-section').value=finding.rule_id==='INS020' || finding.rule_id==='INS021' ? 'comparison' : 'findings';
+    renderInspection();
+    if (Number.isInteger(finding.context.inspection_finding_index))openInspectionFinding(finding.context.inspection_finding_index);
+    return;
+  }
   if (finding.rule_id.startsWith('RAIL')) {
     document.querySelector('.workspace-tab[data-view="rail"]').click();
     const route = railData.routes.find(item => item.route_short_name === finding.context?.route_short_name);
@@ -825,8 +836,9 @@ document.querySelectorAll('.workspace-tab').forEach(tab => tab.addEventListener(
   document.querySelector('#viewer-view').classList.toggle('hidden', tab.dataset.view !== 'viewer');
   document.querySelector('#final-view').classList.toggle('hidden', tab.dataset.view !== 'final');
   document.querySelector('#rail-view').classList.toggle('hidden', tab.dataset.view !== 'rail');
+  document.querySelector('#inspection-view').classList.toggle('hidden',tab.dataset.view!=='inspection');
   for (const missing of ['cad','hastus']) document.querySelector(`#missing-${missing}-view`).classList.toggle('hidden', tab.dataset.view !== `missing-${missing}`);
-  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view.startsWith('missing-'));
+  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view.startsWith('missing-') || tab.dataset.view==='inspection');
 }));
 stopMappingSearch.addEventListener('input', () => { stopMappingLimit = 80; renderStopMappingRows(); });
 stopMappingFilter.addEventListener('change', () => { stopMappingLimit = 80; renderStopMappingRows(); });

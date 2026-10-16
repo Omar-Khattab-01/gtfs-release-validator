@@ -76,6 +76,10 @@ def load(value: dict) -> dict | None:
 
 
 def save(value: dict, job) -> str:
+    if any(item.get('status')!='complete' for item in (job.report or {}).get('stats',{}).get('source_final',{}).values()):
+        return 'Not saved: source-to-final comparison did not complete; next run will retry.'
+    if any(item.get('status')!='complete' for item in (job.report or {}).get('stats',{}).get('individual_feeds',{}).values()):
+        return 'Not saved: an individual feed inspection did not complete; next run will retry.'
     if job.report and job.report.get('stats',{}).get('rail',{}).get('status')=='failed':
         return 'Not saved: rail inspection did not complete; next run will retry.'
     if job.final_validation and any(engine.get('status') not in {'complete','not_requested'} for engine in job.final_validation.values()):

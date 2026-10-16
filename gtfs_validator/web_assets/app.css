@@ -276,3 +276,9 @@ footer { max-width: 1240px; margin: 0 auto; padding: 22px 28px; display: flex; j
 #missing-dialog-body { padding: 20px; }
 #missing-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow: auto; }
 #missing-dialog .field-list dd { overflow-wrap: anywhere; }
+#inspection-dialog { width: min(1000px,94vw); max-height: 92vh; padding: 0; border: 0; border-radius: 12px; color: #183446; }
+#inspection-dialog::backdrop { background: rgba(15,30,40,.6); }
+#inspection-dialog .drawer-header { position: sticky; top: 0; padding: 18px; background: white; z-index: 2; }
+#inspection-dialog-body { padding: 20px; }
+#inspection-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; }
+.workspace-tab:disabled, .route-card:disabled { opacity: .55; cursor: default; }
