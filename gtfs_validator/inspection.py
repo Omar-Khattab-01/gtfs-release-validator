@@ -10,6 +10,7 @@ from .feed_index import get_index
 from .models import ValidationReport
 from .schema import REQUIRED_COLUMNS
 from .archive import REQUIRED_FILES, AGENCY_EXPECTED_FILES
+from .hastus_diagnostics import diagnose, LOG_NAME
 
 SOURCES = {'cad':'CleverCAD','hastus':'HASTUS','rail':'HASTUS rail','final':'Final merged GTFS'}
 RAIL_TYPES = {'0','1','2','12'}
@@ -83,11 +84,25 @@ def inspect_feed(path, source, technical=None, rail_names=()):
                 'inactive_service':('INS014','warning','Trips have no active service dates','No operating dates were established within the declared feed coverage.','Agency review')
             }[kind]
             add(rule,severity,title,f'{len(affected)} trips on this route. {message}','trips.txt',affected[0][0],affected[0][1].get('trip_id'),rid,[item[1].get('trip_id') for item in affected],category)
+    diagnostics = diagnose(index,times,shapes) if source in {'hastus','rail'} else None
+    if diagnostics:
+        for number,entry in enumerate(diagnostics['log']['messages']):
+            # Existing REL009 findings own the GTFS defect severity. Source
+            # severity is preserved, not promoted into a GTFS specification error.
+            result.add('OIG001','info' if entry['assessment']=='confirmed_defect' else 'warning',
+                       'HASTUS export log',entry['title'],entry['raw'],file=LOG_NAME,
+                       context={'diagnostic_message':number,'source_severity':entry['source_severity'],
+                                'assessment':entry['assessment'],'log_line':entry['line'],
+                                'route_ids':entry['route_ids'],'trip_ids':entry['trip_ids']})
     result.finish();validation=result.to_dict()
     trip_routes={trip.get('trip_id'):trip.get('route_id') for trip in trips}
     route_ids={row.get('route_id') for row in routes}
     route_findings=defaultdict(list);unassigned=0
     for number,finding in enumerate(validation['findings']):
+        linked=finding.get('context',{}).get('route_ids',[])
+        if linked:
+            for route_id in linked:route_findings[route_id].append(number)
+            continue
         rid=finding.get('context',{}).get('route_id')
         if not rid and finding.get('file')=='trips.txt' and isinstance(finding.get('row'),int) and 0<=finding['row']-2<len(trips):rid=trips[finding['row']-2].get('route_id')
         if not rid:
@@ -106,14 +121,14 @@ def inspect_feed(path, source, technical=None, rail_names=()):
                              'finding_indices':ids,'status':'needs_review' if serious else 'no_route_findings'})
     files=[{**member,'rows':counts.get(member['name']),'columns':index.columns.get(member['name'],[]),
             'present':True,
-            'check_coverage':'Core table checks' if member['name'] in REQUIRED_COLUMNS else 'Browse all records; no table-specific rules',
+            'check_coverage':'HASTUS text log; line numbers are original log lines' if member['name']==LOG_NAME else 'Core table checks' if member['name'] in REQUIRED_COLUMNS else 'Browse all records; no table-specific rules',
             'finding_indices':[number for number,finding in enumerate(validation['findings']) if finding.get('file')==member['name']]} for member in index.files]
     present={item['name'] for item in files}
     for name in sorted((REQUIRED_FILES | AGENCY_EXPECTED_FILES | {'calendar.txt','calendar_dates.txt'})-present):
         files.append({'name':name,'bytes':0,'rows':None,'columns':[],'present':False,
                       'check_coverage':'Missing required file' if name in REQUIRED_FILES else 'Not supplied (conditional / profile-dependent)',
                       'finding_indices':[number for number,finding in enumerate(validation['findings']) if finding.get('file')==name]})
-    return {'source':source,'label':label,'path':path,'status':'incomplete' if any(item['rule_id']=='RUN002' for item in validation['findings']) else 'complete','validation':validation,'files':files,'routes':route_health,
+    return {'source':source,'label':label,'path':path,'status':'incomplete' if any(item['rule_id']=='RUN002' for item in validation['findings']) else 'complete','validation':validation,'files':files,'routes':route_health,'hastus_diagnostics':diagnostics,
             'unassigned_findings':unassigned,'inventory':{'routes':len(routes),'trips':len(trips),'stops':len(index.stops),'shapes':len(shapes),
             'rail_routes':sum(row.get('route_type') in RAIL_TYPES for row in routes),'bus_routes':sum(row.get('route_type') in {'3','11'} for row in routes)}}
 

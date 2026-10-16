@@ -30,6 +30,7 @@ from .models import ValidationReport
 from .missing_reports import missing_report, variation_evidence, export_excel, printable_report
 from .inspection import add_inspections
 from .source_final import compare_source_final
+from .hastus_diagnostics import export_trips
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -210,7 +211,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.12.0"
+    server_version = "GTFSValidator/0.13.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -268,13 +269,19 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown run"})
             if len(parts) == 3:
                 return self._json(HTTPStatus.OK, job.public())
-            if len(parts)==4 and parts[3] in {'inspection-report.json','inspection-row'}:
+            if len(parts)==4 and parts[3] in {'inspection-report.json','inspection-row','hastus-trips.csv'}:
                 query=parse_qs(parsed_url.query)
                 source=str((query.get('source') or [''])[0]);path={'cad':job.clevercad_path,'hastus':job.hastus_path,'rail':job.rail_path,'final':job.final_path}.get(source)
                 if not path:return self._json(HTTPStatus.BAD_REQUEST,{'error':'This export was not supplied'})
-                if parts[3]=='inspection-report.json':
+                if parts[3] in {'inspection-report.json','hastus-trips.csv'}:
                     inspection=(job.report or {}).get('stats',{}).get('individual_feeds',{}).get(source)
                     if inspection is None:return self._json(HTTPStatus.CONFLICT,{'error':'Inspection is not ready'})
+                    if parts[3]=='hastus-trips.csv':
+                        diagnostics=inspection.get('hastus_diagnostics')
+                        if not diagnostics:return self._json(HTTPStatus.BAD_REQUEST,{'error':'Select a HASTUS export'})
+                        try:content=export_trips(diagnostics,str((query.get('group') or [''])[0]))
+                        except ValueError as exc:return self._json(HTTPStatus.BAD_REQUEST,{'error':str(exc)})
+                        return self._download(content,f'{source}-missing-shape-trips-{job.id}.csv','text/csv; charset=utf-8')
                     return self._download(json.dumps(inspection,ensure_ascii=False,indent=2).encode(),f'{source}-inspection-{job.id}.json','application/json; charset=utf-8')
                 try:
                     name=str((query.get('file') or [''])[0]);row=int((query.get('row') or ['0'])[0])

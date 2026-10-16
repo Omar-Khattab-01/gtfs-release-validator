@@ -4,6 +4,8 @@ let inspectionSource='hastus';
 let inspectionEvidenceRequest=0;
 let inspectionFindingLimit=100;
 let inspectionOpener=null;
+let diagnosticFilter='';
+let diagnosticTripLimit=100;
 const inspectionDialog=document.querySelector('#inspection-dialog');
 const inspectionLabels={cad:'CleverCAD',hastus:'HASTUS bus',rail:'HASTUS rail',final:'Final merged GTFS'};
 
@@ -45,6 +47,9 @@ function renderInspection() {
     const categories={};
     for (const finding of validation.findings || [])categories[finding.category]=(categories[finding.category] || 0)+1;
     target.innerHTML=heading+`<div class="metric-grid">${Object.entries(inventory).map(([name,value])=>`<div class="metric"><strong>${value}</strong><span>${escapeHtml(name.replaceAll('_',' '))}</span></div>`).join('')}</div><p>Inspection status: ${escapeHtml(data.status)} · ${data.files.filter(file=>file.present!==false).length} archive members</p><p>${Object.entries(categories).map(([name,value])=>`${value} ${escapeHtml(name)}`).join(' · ')}</p><p>Technical findings, agency review items and content-scope checks are listed separately by category. Optional destination and shape fields are review items, not GTFS required-field errors.</p><p>${validation.suppressed_findings ? `${validation.suppressed_findings} additional findings were suppressed by the evidence limit.` : ''}</p><button type="button" data-inspection-section="files">Inspect all files</button> <button type="button" data-inspection-section="routes">Inspect routes and variations</button> <button type="button" data-inspection-section="findings">Review findings</button><p>Use an approved expected-service list or prior export to establish whether entire routes or variations were omitted.</p>`;
+    if (data.hastus_diagnostics)target.innerHTML+='<button type="button" data-inspection-section="diagnostics">HASTUS export diagnostics</button>';
+  } else if (view==='diagnostics') {
+    target.innerHTML=heading+renderHastusDiagnostics(data.hastus_diagnostics);
   } else if (view==='files') {
     const files=data.files.filter(file=>inspectionSearch(file.name));
     target.innerHTML=heading+`<div class="comparison-table"><table><thead><tr><th>File</th><th>Records</th><th>Columns</th><th>Bytes</th><th>Checks</th><th>Findings</th><th>Inspect</th></tr></thead><tbody>${files.map(file=>`<tr><td>${escapeHtml(file.name)}${file.present===false ? '<br><strong>Not supplied</strong>' : ''}</td><td>${file.rows ?? 'Unavailable'}</td><td><details><summary>${file.columns.length} columns</summary>${escapeHtml(file.columns.join(', '))}</details></td><td>${file.bytes}</td><td>${escapeHtml(file.check_coverage)}</td><td>${file.finding_indices.length}</td><td>${file.columns.length ? `<button type="button" data-inspection-file="${escapeHtml(file.name)}">Open table</button>` : 'No parsed table'}</td></tr>`).join('')}</tbody></table></div>`;
@@ -66,12 +71,67 @@ function renderInspection() {
   }
 }
 
+function diagnosticCsv(group='') {
+  return `/api/runs/${currentRunId}/hastus-trips.csv?${new URLSearchParams({source:inspectionSource,...(group!=='' ? {group} : {})})}`;
+}
+
+function renderHastusDiagnostics(data) {
+  if (!data)return '<p>Select a supplied HASTUS bus or rail export to inspect its export diagnostics.</p>';
+  const counts=data.counts;
+  const groups=data.missing_shapes.filter(group=>inspectionSearch(group)).sort((a,b)=>String(a.route.route_short_name || a.route_id).localeCompare(String(b.route.route_short_name || b.route_id),undefined,{numeric:true}));
+  const messages=data.log.messages.map((entry,index)=>({entry,index})).filter(({entry})=>inspectionSearch(entry) && (!diagnosticFilter || (diagnosticFilter==='unknown' ? entry.kind==='unknown' : entry.assessment===diagnosticFilter)));
+  return `<h4>HASTUS export diagnostics</h4><div class="metric-grid"><div class="metric"><strong>${counts.missing_shapes}</strong><span>Missing referenced shapes</span></div><div class="metric"><strong>${counts.affected_trips}</strong><span>Trips affected by missing shapes</span></div><div class="metric"><strong>${counts.messages}</strong><span>Export log messages</span></div><div class="metric"><strong>${counts.source_review}</strong><span>Source warnings needing review</span></div></div>
+    <p>${data.log.status==='not_supplied' ? 'error_warning.txt was not supplied. Independent shape-reference checks still ran; an absent log does not prove a clean or completed HASTUS export.' : data.log.status==='empty' ? 'error_warning.txt is empty. Independent GTFS checks still apply.' : `Log: error_warning.txt · ${escapeHtml(data.log.encoding)} · ${counts.source_errors} source errors · ${counts.unknown_messages} unrecognized messages.`}</p>${data.log.warning ? `<p>${escapeHtml(data.log.warning)}</p>` : ''}
+    <h4>Confirmed missing-shape references</h4><p>Grouped by route, direction and shape. Open a group for its complete trip records, or inspect the route’s stop-sequence variations. Stop times may still exist even when geometry is absent.</p>
+    <a href="${diagnosticCsv()}" download>Export all affected trips (CSV / Excel)</a>
+    <div class="comparison-table"><table><thead><tr><th>Route</th><th>Direction / headsign</th><th>Missing shape</th><th>Trips</th><th>Stop-time rows</th><th>Log evidence</th><th>Inspect</th></tr></thead><tbody>${groups.slice(0,inspectionFindingLimit).map(group=>`<tr><td>${escapeHtml(group.route.route_short_name || group.route_id)}<br>${escapeHtml(group.route_id)}</td><td>${escapeHtml(group.direction_id)} · ${escapeHtml(group.headsigns.join(' / '))}</td><td>${escapeHtml(group.shape_id)}</td><td>${group.trip_count}</td><td>${group.stop_time_count} · ${group.trips_without_stop_times} trips without stop times</td><td>${escapeHtml(group.log_lines.length ? 'Lines '+group.log_lines.join(', ') : 'No matching source warning')}</td><td><button type="button" data-diagnostic-group="${escapeHtml(group.id)}">View trips & evidence</button></td></tr>`).join('') || '<tr><td colspan="7">No missing-shape groups match this search.</td></tr>'}</tbody></table></div>
+    <h4>Export warnings and errors</h4><p>Source severity is the original HASTUS label. The assessment below states what the exported GTFS actually confirms.</p>
+    <label>Diagnostic assessment <select id="diagnostic-filter">${[['','All messages'],['confirmed_defect','Confirmed GTFS defect'],['source_review','Needs HASTUS review'],['unknown','Unrecognized text']].map(([value,label])=>`<option value="${value}" ${diagnosticFilter===value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    <p>${messages.length} matching log messages</p>${messages.slice(0,inspectionFindingLimit).map(({entry,index})=>`<article class="validation-file"><h4>${escapeHtml(entry.title)}</h4><p>Log line ${entry.line} · HASTUS: ${escapeHtml(entry.source_severity)} · ${entry.assessment==='confirmed_defect' ? 'Confirmed GTFS defect: referenced shape is absent' : 'Needs HASTUS review'}</p><p>${escapeHtml(entry.raw)}</p><button type="button" data-diagnostic-message="${index}">View evidence & recommended action</button></article>`).join('') || '<p>No log messages match this filter.</p>'}
+    ${groups.length>inspectionFindingLimit || messages.length>inspectionFindingLimit ? '<button type="button" data-inspection-more>Show more diagnostics</button>' : ''}
+    <details><summary>Supported OIG checks (${data.rule_inventory.length})</summary>${data.rule_inventory.map(rule=>`<h5>${escapeHtml(rule.title)}</h5><p>${escapeHtml(rule.action)}</p>`).join('')}</details>`;
+}
+
+function openDiagnostic(kind,id,opener=null,more=false) {
+  const data=inspectionData[inspectionSource]?.hastus_diagnostics;
+  if (!data)return;
+  inspectionEvidenceRequest++;
+  if (!more) {inspectionOpener=opener;diagnosticTripLimit=100;}
+  let html='';let title='';
+  if (kind==='group') {
+    const group=data.missing_shapes.find(item=>item.id===id);if (!group)return;
+    title=`Route ${group.route.route_short_name || group.route_id} · Missing shape ${group.shape_id}`;
+    html=`<p>Confirmed GTFS defect · ${group.trip_count} trips · Direction ${escapeHtml(group.direction_id)} · ${group.stop_time_count} stop-time records · ${group.trips_without_stop_times} trips without stop times</p><p>Repair the HASTUS pattern itineraries and re-export. Missing geometry does not by itself prove that a downstream system dropped these trips.</p>${sourceCard('Route',group.route)}<p><a href="${diagnosticCsv(group.id)}" download>Export this group’s complete trip list (CSV / Excel)</a></p><button type="button" data-inspection-route="${escapeHtml(group.route_id)}">Inspect all route variations</button> ${inspectionData.final ? '<button type="button" data-inspection-section="comparison">Compare source → final</button>' : ''}
+      <p>Showing ${Math.min(group.trips.length,diagnosticTripLimit)} of ${group.trips.length} trips. Open a trip for every stop, stop time and its map.</p><div class="comparison-table"><table><thead><tr><th>Trip</th><th>Service</th><th>Headsign</th><th>Block</th><th>Stop times</th><th>Inspect</th></tr></thead><tbody>${group.trips.slice(0,diagnosticTripLimit).map(trip=>`<tr><td>${escapeHtml(trip.trip_id)}</td><td>${escapeHtml(trip.service_id || '')}</td><td>${escapeHtml(trip.trip_headsign || '')}</td><td>${escapeHtml(trip.block_id || '')}</td><td>${trip.stop_time_count}</td><td><button type="button" data-inspection-trip="${escapeHtml(trip.trip_id)}">Full trip & stops</button><details><summary>All trip fields</summary>${sourceCard('trips.txt record',trip)}</details></td></tr>`).join('')}</tbody></table></div>${group.trips.length>diagnosticTripLimit ? `<button type="button" data-diagnostic-more="${escapeHtml(id)}">Show more trips</button>` : ''}
+      <h4>Source messages</h4>${data.log.messages.filter(entry=>group.log_lines.includes(entry.line)).map(entry=>`<p>Line ${entry.line} · ${escapeHtml(entry.source_severity)}</p><pre>${escapeHtml(entry.raw)}</pre>`).join('') || '<p>No matching source warning. This defect was detected directly from GTFS records.</p>'}`;
+  } else {
+    const entry=data.log.messages[Number(id)];if (!entry)return;
+    title=entry.title;
+    html=`<p>HASTUS: ${escapeHtml(entry.source_severity)} · ${entry.assessment==='confirmed_defect' ? 'Confirmed missing-shape reference' : 'Needs HASTUS review'} · Log line ${entry.line}</p><pre>${escapeHtml(entry.raw)}</pre><h4>Recommended action</h4><p>${escapeHtml(entry.action)}</p><p>${entry.trip_ids.length} linked trips · ${entry.route_ids.length} linked routes</p>`;
+    for (const evidence of entry.evidence) {
+      if ('stop' in evidence)html+=sourceCard('Exported stop',evidence.stop || {})+sourceCard('Exported parent station',evidence.parent_station || {});
+      else html+=`<pre>${escapeHtml(JSON.stringify(evidence,null,2))}</pre>`;
+    }
+    if (!entry.evidence.length)html+='<p>No exact exported entity association was established. Review the original message in HASTUS; no trip identity was guessed.</p>';
+    html+=entry.route_ids.map(route=>`<button type="button" data-inspection-route="${escapeHtml(route)}">Inspect route ${escapeHtml(route)}</button>`).join(' ');
+    html+=data.missing_shapes.filter(group=>group.log_lines.includes(entry.line)).map(group=>`<button type="button" data-diagnostic-group="${escapeHtml(group.id)}">View ${group.trip_count} trips · shape ${escapeHtml(group.shape_id)}</button>`).join(' ');
+  }
+  document.querySelector('#inspection-dialog-title').textContent=title;
+  document.querySelector('#inspection-dialog-body').innerHTML=html;
+  if (!inspectionDialog.open)inspectionDialog.showModal();
+}
+
 async function inspectionOpenViewer(source, {file='',row=0,route='',trip=''}={}) {
   inspectionDialog.close();
   document.querySelector('#viewer-source').value=source;
   await loadViewer();
   document.querySelector('.workspace-tab[data-view="viewer"]').click();
-  if (trip)await openViewerTrip(trip);
+  if (trip) {
+    // Direct evidence links do not first open a route / variation, so create
+    // the same selected-trip controls expected by the viewer's race guards.
+    document.querySelector('#viewer-content').innerHTML=`<h4>Trip ${escapeHtml(trip)}</h4><label>Trip<select id="viewer-trip-choice"><option value="${escapeHtml(trip)}">${escapeHtml(trip)}</option></select></label><div id="viewer-trip-detail"></div>`;
+    await openViewerTrip(trip);
+  }
   else if (route)await openViewerRoute(route);
   else if (file) {
     document.querySelector('#viewer-table').value=file;
@@ -84,6 +144,7 @@ async function inspectionOpenViewer(source, {file='',row=0,route='',trip=''}={})
 async function openInspectionFinding(index,opener=null) {
   const finding=inspectionData[inspectionSource]?.validation?.findings[index];
   if (!finding)return;
+  if (finding.context?.diagnostic_message!==undefined) {openDiagnostic('message',String(finding.context.diagnostic_message),opener);return;}
   const source=inspectionSource;const request=++inspectionEvidenceRequest;
   inspectionOpener=opener;
   const body=document.querySelector('#inspection-dialog-body');
@@ -109,7 +170,10 @@ async function openInspectionFinding(index,opener=null) {
 function inspectionAction(event) {
   const button=event.target.closest('button');if (!button)return;
   if (button.dataset.inspectionSource) {inspectionSource=button.dataset.inspectionSource;inspectionFindingLimit=100;renderInspection();}
-  else if (button.dataset.inspectionSection) {document.querySelector('#inspection-section').value=button.dataset.inspectionSection;renderInspection();}
+  else if (button.dataset.inspectionSection) {inspectionDialog.close();document.querySelector('#inspection-section').value=button.dataset.inspectionSection;renderInspection();}
+  else if (button.dataset.diagnosticGroup!==undefined)openDiagnostic('group',button.dataset.diagnosticGroup,button);
+  else if (button.dataset.diagnosticMessage!==undefined)openDiagnostic('message',button.dataset.diagnosticMessage,button);
+  else if (button.dataset.diagnosticMore!==undefined) {diagnosticTripLimit+=100;openDiagnostic('group',button.dataset.diagnosticMore,null,true);}
   else if (button.dataset.inspectionFinding!==undefined)openInspectionFinding(Number(button.dataset.inspectionFinding),button);
   else if (button.dataset.inspectionMore!==undefined) {inspectionFindingLimit+=100;renderInspection();}
   else if (button.dataset.inspectionFile)inspectionOpenViewer(inspectionSource,{file:button.dataset.inspectionFile,row:Number(button.dataset.row || 0)});
@@ -121,6 +185,7 @@ function inspectionAction(event) {
   else if (button.dataset.inspectionOpenTab)document.querySelector(`.workspace-tab[data-view="${button.dataset.inspectionOpenTab}"]`).click();
 }
 document.querySelector('#inspection-view').addEventListener('click',inspectionAction);
+document.querySelector('#inspection-view').addEventListener('change',event=>{if (event.target.id==='diagnostic-filter') {diagnosticFilter=event.target.value;inspectionFindingLimit=100;renderInspection();}});
 document.querySelector('#inspection-dialog-body').addEventListener('click',inspectionAction);
 for (const control of ['inspection-section','inspection-level'])document.querySelector('#'+control).addEventListener('change',()=>{inspectionFindingLimit=100;renderInspection();});
 document.querySelector('#inspection-search').addEventListener('input',()=>{inspectionFindingLimit=100;renderInspection();});

@@ -120,7 +120,7 @@ function renderShapeMap(data) {
   const scale = Math.min(640/(dx*Math.cos(minY*Math.PI/180)), 300/dy);
   const x = lon => 30+(lon-minX)*Math.cos(minY*Math.PI/180)*scale;
   const y = lat => 330-(lat-minY)*scale;
-  return `<section class="map-card"><h4>Shape and stops · North ↑</h4><svg viewBox="0 0 700 360" class="mini-map" role="img" aria-label="Local route shape and stops"><polyline points="${points.map(point => `${x(point[0])},${y(point[1])}`).join(' ')}" fill="none" stroke="#c5202f" stroke-width="3"/>${stops.map(stop => `<circle cx="${x(stop.lon)}" cy="${y(stop.lat)}" r="4" fill="#183446"><title>${escapeHtml(stop.sequence)} · ${escapeHtml(stop.stop_name)}</title></circle>`).join('')}</svg><p>Red: exported shape · Blue: stops. Hover a stop for its name and sequence.</p></section>`;
+  return `<section class="map-card"><h4>Shape and stops · North ↑</h4><svg viewBox="0 0 700 360" class="mini-map" role="img" aria-label="Local route shape and stops"><polyline points="${points.map(point => `${x(point[0])},${y(point[1])}`).join(' ')}" fill="none" stroke="#c5202f" stroke-width="3"/>${stops.map(stop => `<circle cx="${x(stop.lon)}" cy="${y(stop.lat)}" r="4" fill="#183446"><title>${escapeHtml(stop.sequence)} · ${escapeHtml(stop.stop_name)}</title></circle>`).join('')}</svg><p>${points.length ? 'Red: exported shape · Blue: stops.' : 'No valid exported shape geometry is available. Blue: exported stops only, not a reconstructed route shape.'} Hover a stop for its name and sequence.</p></section>`;
 }
 
 async function openViewerTrip(tripId) {

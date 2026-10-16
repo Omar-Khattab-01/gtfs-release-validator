@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .archive import MAX_MEMBER_BYTES, MAX_TOTAL_BYTES, is_unsafe_name
 from . import cache_store
+from .hastus_diagnostics import LOG_NAME, LOG_LIMIT, decode_log
 
 
 class FeedIndex:
@@ -51,6 +52,16 @@ class FeedIndex:
                     continue
                 if item.file_size > MAX_MEMBER_BYTES:
                     raise ValueError("GTFS table exceeds the browsing size limit")
+                if item.filename == LOG_NAME:
+                    if item.file_size > LOG_LIMIT:
+                        raise ValueError('HASTUS export log exceeds the 8 MB browsing limit')
+                    text, encoding, warning = decode_log(archive.read(item))
+                    self.files[-1]['text_log'] = {'encoding':encoding, 'warning':warning}
+                    self.columns[item.filename] = ['line_number', 'message']
+                    db.executemany('INSERT INTO records VALUES (?,?,?,?,?)',
+                                   ((item.filename, number, '', '', json.dumps({'line_number':number+1, 'message':line}, ensure_ascii=False))
+                                    for number,line in enumerate(text.splitlines())))
+                    continue
                 entity_field, parent_field = {
                     "stops.txt": ("stop_id", ""),
                     "trips.txt": ("trip_id", "route_id"),

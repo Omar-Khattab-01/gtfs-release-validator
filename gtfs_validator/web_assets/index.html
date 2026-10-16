@@ -85,7 +85,7 @@
       <section class="panel" id="inspection-view">
         <h3>Individual feed inspection</h3><p id="inspection-workflow"></p>
         <div id="inspection-sources" class="route-grid"></div>
-        <div class="missing-toolbar"><label>Inspection view<select id="inspection-section"><option value="overview">Overview</option><option value="files">File health</option><option value="routes">Route health</option><option value="findings">Findings</option><option value="comparison">Source → final</option></select></label><label>Search this feed<input type="search" id="inspection-search" placeholder="Route, file, rule, trip, message"></label><label>Finding level<select id="inspection-level"><option value="">All levels</option><option value="blocker">Blocker</option><option value="error">Error</option><option value="warning">Warning</option><option value="info">Info</option></select></label></div>
+        <div class="missing-toolbar"><label>Inspection view<select id="inspection-section"><option value="overview">Overview</option><option value="files">File health</option><option value="routes">Route health</option><option value="diagnostics">HASTUS export diagnostics</option><option value="findings">Findings</option><option value="comparison">Source → final</option></select></label><label>Search this feed<input type="search" id="inspection-search" placeholder="Route, file, rule, trip, message"></label><label>Finding level<select id="inspection-level"><option value="">All levels</option><option value="blocker">Blocker</option><option value="error">Error</option><option value="warning">Warning</option><option value="info">Info</option></select></label></div>
         <div id="inspection-content" aria-live="polite"></div>
       </section>
       <section class="panel hidden missing-report-view" id="missing-hastus-view" data-missing="hastus">
@@ -199,7 +199,7 @@
     <div id="missing-dialog-body"></div>
   </dialog>
   <dialog id="inspection-dialog" aria-labelledby="inspection-dialog-title"><div class="drawer-header"><h2 id="inspection-dialog-title">Feed evidence</h2><button type="button" id="inspection-dialog-close" aria-label="Close feed evidence">×</button></div><div id="inspection-dialog-body"></div></dialog>
-  <footer><span>GTFS Merge Auditor 0.12.0</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.13.0</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
   <script src="/assets/missing-reports.js" defer></script>
   <script src="/assets/inspection.js" defer></script>

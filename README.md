@@ -21,6 +21,21 @@ The **Individual feeds** tab checks every supplied export independently:
 - **Findings:** search by rule/file/trip, filter by level, open the affected
   CSV record in a popup, then jump to the full file or route. Each feed has its
   own downloadable inspection JSON.
+- **HASTUS export diagnostics:** automatically reads `error_warning.txt` from
+  a bus or rail HASTUS ZIP as text, preserving original messages and line numbers.
+  Recognizes the 11 warning/error conditions in the reviewed OIG, including its
+  French templates where provided. Unknown messages remain visible for review.
+  Source severity is separate from confirmed GTFS defects: station-code usage,
+  source descriptions and internal scheduling conditions are not automatically
+  promoted into GTFS specification errors. Stop warnings show exported stop and
+  parent-station attributes; route and service evidence is linked when possible.
+  Missing shape references are checked even without a log, grouped by route,
+  direction and shape, with trip counts, complete trip fields, stop-time counts,
+  original source messages and links to full trips / route variations. Download
+  all affected trips or one group as an Excel-compatible CSV. This detects broken
+  references, not proof of downstream trip loss. No OIG execution or Java needed.
+  The index schema changed for text-log support: an older saved index rebuilds
+  once after this update, then the corrected index and audit can be reused.
 - **Source → final:** when only one bus source is supplied, compare its trips
   with the optional final, including operating-date coverage, ordered stops,
   times/boarding rules, trip attributes and shape geometry. Rail uses its

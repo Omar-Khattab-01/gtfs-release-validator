@@ -4,7 +4,7 @@ import re
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_BYTES = 10 * 1024**3
 MAX_AGE_SECONDS = 30 * 86400
 NAME = re.compile(r"(?:index-v2-[0-9a-f]{64}\.sqlite|audit-v1-[0-9a-f]{64}\.json)$")
