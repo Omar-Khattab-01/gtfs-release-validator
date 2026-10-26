@@ -1,0 +1,9 @@
+{
+  "exclude_routes": ["898"],
+  "direction_rules": [{"route_min": 400, "route_max": 499, "keep": ["0"]}],
+  "timing_tolerance_seconds": 60,
+  "minimum_stop_coverage": 0.8,
+  "clear_block_ids": [],
+  "omit_tables": ["fare_attributes.txt", "fare_rules.txt", "frequencies.txt", "transfers.txt"],
+  "allow_omit_nonempty_tables": ["fare_attributes.txt", "fare_rules.txt"]
+}

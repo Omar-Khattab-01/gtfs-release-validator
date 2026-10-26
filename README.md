@@ -5,6 +5,15 @@ any single ZIP. Supply HASTUS bus first, add CleverCAD when it becomes available
 and add HASTUS rail and the final merged feed when ready. Every input is optional;
 at least one is required. Nothing is uploaded or modified.
 
+### Local merge candidate builder
+
+The experimental `merge_gtfs.py` command now creates a new local GTFS candidate
+from CleverCAD, HASTUS bus and optional rail. It produces a detailed source
+crosswalk, policy receipt and validation results, with an independent historical
+final comparison available after generation. See [MERGE_BUILDER.md](MERGE_BUILDER.md)
+for Windows commands, reconstructed field rules, exclusions and limitations.
+Supplied archives remain read-only; candidate files are always newly named.
+
 ### Individual feed inspection
 
 The **Individual feeds** tab checks every supplied export independently:
