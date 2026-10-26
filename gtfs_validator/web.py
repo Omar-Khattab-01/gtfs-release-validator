@@ -31,6 +31,7 @@ from .missing_reports import missing_report, variation_evidence, export_excel, p
 from .inspection import add_inspections
 from .source_final import compare_source_final
 from .hastus_diagnostics import export_trips
+from . import build_web
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -211,7 +212,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.13.0"
+    server_version = "GTFSValidator/0.15.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -263,6 +264,17 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             return self._serve_asset(name)
 
         parts = [part for part in path.split("/") if part]
+        if parts[:2] == ['api', 'builds']:
+            try:
+                if len(parts) == 2:
+                    return self._json(HTTPStatus.OK, build_web.list_builds())
+                if len(parts) == 3:
+                    return self._json(HTTPStatus.OK, build_web.get_build(parts[2]))
+                if len(parts) == 5 and parts[3] == 'download':
+                    return self._download_file(build_web.artifact(parts[2], parts[4]))
+            except (OSError, ValueError, KeyError) as exc:
+                return self._json(HTTPStatus.NOT_FOUND, {'error': str(exc)})
+            return self._json(HTTPStatus.NOT_FOUND, {'error': 'Unknown build resource'})
         if len(parts) >= 3 and parts[:2] == ["api", "runs"]:
             job = _find_job(parts[2])
             if job is None:
@@ -447,7 +459,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request_path = urlparse(self.path).path
-        if request_path not in {"/api/runs", "/api/cache/clear"}:
+        if request_path not in {"/api/runs", "/api/cache/clear", '/api/builds', '/api/builds/pick'}:
             return self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
         if self.headers.get("X-GTFS-Validator") != "1":
             return self._json(HTTPStatus.FORBIDDEN, {"error": "Missing local request header"})
@@ -463,6 +475,13 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid JSON"})
         if not isinstance(payload, dict):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Expected a JSON object"})
+        if request_path in {'/api/builds', '/api/builds/pick'}:
+            try:
+                if request_path.endswith('/pick'):
+                    return self._json(HTTPStatus.OK, build_web.pick_path(str(payload.get('kind', ''))))
+                return self._json(HTTPStatus.ACCEPTED, build_web.start_build(payload))
+            except (OSError, ValueError, KeyError) as exc:
+                return self._json(HTTPStatus.BAD_REQUEST, {'error': str(exc)})
         if request_path == "/api/cache/clear":
             return self._json(HTTPStatus.OK, cache_info(remove_unused=True))
         validation_date = str(payload.get("validation_date") or date.today().isoformat())
@@ -514,6 +533,17 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
+
+    def _download_file(self, path: Path) -> None:
+        # Large GTFS downloads are streamed, not copied into server RAM.
+        with path.open('rb') as stream:
+            self.send_response(HTTPStatus.OK)
+            self._security_headers(mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
+            self.send_header('Content-Disposition', f'attachment; filename="{path.name}"')
+            self.send_header('Content-Length', str(path.stat().st_size))
+            self.end_headers()
+            while block := stream.read(1024 * 1024):
+                self.wfile.write(block)
 
     def _download_csv(self, report: dict[str, Any], job_id: str) -> None:
         output = io.StringIO(newline="")

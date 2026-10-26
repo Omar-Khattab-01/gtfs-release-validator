@@ -25,7 +25,7 @@ def canonical(row):
     return clean
 
 
-def compare_releases(candidate,reference):
+def compare_releases(candidate,reference,progress=None):
     """Stream to private SQLite storage rather than retaining millions of dicts."""
     report={'candidate':str(candidate),'reference':str(reference),'tables':{},'equivalent':True,
             'comparison':'Keyed GTFS records; surrounding whitespace and numeric formatting normalized. ZIP byte order is not compared.'}
@@ -43,6 +43,7 @@ def compare_releases(candidate,reference):
             db.execute('PRAGMA journal_mode=OFF');db.execute('PRAGMA synchronous=OFF')
             db.execute('CREATE TABLE expected (key TEXT PRIMARY KEY,data TEXT,seen INTEGER DEFAULT 0) WITHOUT ROWID')
             for name in sorted(cn & rn):
+                if progress:progress('Comparing '+name+' with the reference final')
                 if name not in KEYS:
                     same=output.read(name)==baseline.read(name);report['tables'][name]={'byte_equal':same}
                     report['equivalent'] &= same;continue
@@ -52,6 +53,7 @@ def compare_releases(candidate,reference):
                     try:db.execute('INSERT INTO expected(key,data) VALUES (?,?)',(key,json.dumps(canonical(row),sort_keys=True,separators=(',',':'))))
                     except sqlite3.IntegrityError:raise ValueError('Duplicate reference key in '+name+': '+key)
                     stats['reference_rows']+=1
+                    if progress and (number+1)%500000==0:progress(f'Comparing {name}: indexed {number+1:,} reference records')
                 db.commit()
                 for number,row in enumerate(read_table(output,name)):
                     key=json.dumps([row.get(k,'') for k in KEYS[name]] if KEYS[name] else [number],separators=(',',':'));stats['candidate_rows']+=1
@@ -68,6 +70,7 @@ def compare_releases(candidate,reference):
                         stats['changed_rows']+=1;changes.update(different.keys())
                         if len(examples)<12:examples.append({'key':key,'kind':'changed','fields':different})
                     else:stats['equal_rows']+=1
+                    if progress and (number+1)%500000==0:progress(f'Comparing {name}: checked {number+1:,} generated records')
                 stats['reference_only_rows']=db.execute('SELECT COUNT(*) FROM expected WHERE seen=0').fetchone()[0]
                 for key,data in db.execute('SELECT key,data FROM expected WHERE seen=0 LIMIT 5'):
                     if len(examples)<16:examples.append({'key':key,'kind':'reference_only','reference':json.loads(data)})

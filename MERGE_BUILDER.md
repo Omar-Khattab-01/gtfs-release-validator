@@ -10,7 +10,42 @@ software. Every output is marked `DRAFT_NOT_APPROVED` in its companion report.
 Matching a historical release establishes that release's reproducibility; it
 does not establish the correct agency policy for every future release.
 
-## Windows command
+## Windows interface (recommended)
+
+1. Open **`start_windows.bat`**, as you do for validation.
+2. Click **Build merged GTFS** at the top of the website.
+3. Browse for the required CleverCAD and HASTUS bus ZIPs. Add the separate
+   HASTUS rail ZIP for a complete agency feed. **Use inspector paths** reuses
+   the paths already entered in the inspection form.
+4. Choose the first/last service dates and a save folder. Leave the ZIP filename
+   blank for a unique name, or enter a new `.zip` filename.
+5. Press **Build draft GTFS**. Keep the server's command window open while it
+   reads, matches, builds and verifies the feed. Large exports take several minutes.
+
+The page shows route/trip/stop counts, grouped review items, core validation and
+archive checks. Download the generated ZIP, full receipt/crosswalk and review CSV.
+**Use in inspector** fills the existing inspection form with the sources and
+generated final; choose your validation options and press **Validate & inspect**.
+
+Under **Optional comparison and custom settings**, you can select a reference
+final for an independent comparison, a custom policy JSON or a route-sort CSV.
+Reference differences do not remove the generated draft. Failed comparisons
+are displayed separately and leave the draft and receipt available.
+
+**Recent builds** recovers completed results after restarting. Build history is
+stored in `%LOCALAPPDATA%\GTFS Merge Auditor\build-history`, separately from the
+index cache. The default output folder is `merged-exports` alongside it. Original
+outputs remain in the selected save folder; browser downloads are additional
+copies. Moving/deleting outputs outside the app makes those downloads unavailable.
+If the server stops mid-build, history marks the build interrupted rather than
+claiming it finished. Only one merge runs at a time within the local server.
+
+Browse uses Python's native Tk file dialog on the server's computer. If that
+component is unavailable in a restricted Python installation, paste the full path;
+quoted and unquoted Windows paths both work. No browser file uploads are needed.
+The page remembers its form fields in local browser storage when available.
+
+## Windows command (alternative)
 
 Open a command prompt in this project folder. Choose a new output filename and
 the intended publication window, expressed as GTFS service dates:

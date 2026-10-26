@@ -111,6 +111,7 @@ def build_release(cad_path,hastus_path,output_path,*,start_date,end_date,rail_pa
     inputs={k:Path(v).expanduser().resolve() for k,v in [('cad',cad_path),('hastus',hastus_path),('rail',rail_path)] if v}
     if output in inputs.values() or receipt_path in inputs.values():raise ValueError('Output cannot replace a source archive')
     before={k:digest(v) for k,v in inputs.items()}
+    if progress:progress('Reading source ZIPs and calendars')
     feeds={k:Source(str(v),k) for k,v in inputs.items()};cad=feeds['cad'];bus=feeds['hastus'];rail=feeds.get('rail')
     warnings=[];changes=Counter();counts=Counter()
     def warn(kind,message,**context):warnings.append({'kind':kind,'message':message,**context})
@@ -141,6 +142,7 @@ def build_release(cad_path,hastus_path,output_path,*,start_date,end_date,rail_pa
     cad.load_models({sid:sid for sid in cad.stops},kept)
     bus.load_models(bus_map)
     matches=match_sources(cad,bus,policy['timing_tolerance_seconds'],policy['minimum_stop_coverage'],progress)
+    if progress:progress('Applying source metadata and publication policy')
     candidate_rows={};final_trips={};match_receipt=[]
     for tid in sorted(kept):
         result=matches[tid];target=cad.models[tid];record=dict(cad.trips[tid]);ids=result['candidate_ids']
@@ -258,6 +260,7 @@ def build_release(cad_path,hastus_path,output_path,*,start_date,end_date,rail_pa
     output.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='gtfs-merge-build-',dir=output.parent) as folder:
         staged=Path(folder)/'candidate.zip';positions=Counter();shape_seen=set()
+        if progress:progress('Writing merged GTFS tables')
         with zipfile.ZipFile(staged,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as archive:
             for name,rows in [('agency.txt',cad.rows('agency.txt')),('feed_info.txt',[info]),('routes.txt',[routes[k] for k in sorted(routes)]),
                               ('stops.txt',[stops[k] for k in sorted(stops)]),('trips.txt',[final_trips[k] for k in sorted(final_trips)]),
@@ -303,6 +306,7 @@ def build_release(cad_path,hastus_path,output_path,*,start_date,end_date,rail_pa
                     shape_seen.update(own)
         if used_shapes-shape_seen:raise ValueError('Missing referenced shapes: '+', '.join(sorted(used_shapes-shape_seen)[:20]))
         receipt['counts'].update(counts)
+        if progress:progress('Checking ZIP integrity and stored/extracted permissions')
         receipt['archive_verification']=verify_package(staged,FIELDS)
         if progress:progress('Running independent core GTFS validation')
         validation=validate_feed(staged,profile='source-inspection').to_dict()

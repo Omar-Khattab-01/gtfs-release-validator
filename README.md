@@ -3,15 +3,20 @@
 This local Windows application supports the full export workflow, starting with
 any single ZIP. Supply HASTUS bus first, add CleverCAD when it becomes available,
 and add HASTUS rail and the final merged feed when ready. Every input is optional;
-at least one is required. Nothing is uploaded or modified.
+at least one is required. Supplied exports stay on this device and remain unchanged.
 
 ### Local merge candidate builder
 
-The experimental `merge_gtfs.py` command now creates a new local GTFS candidate
-from CleverCAD, HASTUS bus and optional rail. It produces a detailed source
-crosswalk, policy receipt and validation results, with an independent historical
-final comparison available after generation. See [MERGE_BUILDER.md](MERGE_BUILDER.md)
-for Windows commands, reconstructed field rules, exclusions and limitations.
+Open `start_windows.bat`, then choose **Build merged GTFS** at the top of the
+local website. Browse for CAD, HASTUS bus and optional rail, choose publication
+dates and a save folder, and press **Build draft GTFS**. Follow progress, review
+grouped findings, download the ZIP/receipt/CSV, or use the result in the inspector.
+Recent builds remain available after restarting, separately from the index cache.
+
+The experimental builder also has a `merge_gtfs.py` command. Both interfaces use
+the same source-only algorithm and provide an optional independent comparison
+with a historical final after generation. See [MERGE_BUILDER.md](MERGE_BUILDER.md)
+for the interface, Windows commands, field rules, exclusions and limitations.
 Supplied archives remain read-only; candidate files are always newly named.
 
 ### Individual feed inspection
