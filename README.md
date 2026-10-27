@@ -1,337 +1,37 @@
-# OC Transpo GTFS Merge Auditor
+# GTFS Release Validator
 
-This local Windows application supports the full export workflow, starting with
-any single ZIP. Supply HASTUS bus first, add CleverCAD when it becomes available,
-and add HASTUS rail and the final merged feed when ready. Every input is optional;
-at least one is required. Supplied exports stay on this device and remain unchanged.
+I built this tool to make GTFS exports easier to inspect before and after a feed is merged for publication. Transit data can be structurally valid and still lose a stop, change a trip pattern, or carry inconsistent information between scheduling systems. I wanted a way to trace those differences back to the source records.
 
-### Local merge candidate builder
+The application brings together individual feed inspection, CleverCAD and HASTUS bus comparisons, HASTUS rail review, final-feed validation, and an experimental merge candidate builder. Feed processing stays on the workstation, and the original archives remain unchanged.
 
-Open `start_windows.bat`, then choose **Build merged GTFS** at the top of the
-local website. Browse for CAD, HASTUS bus and optional rail, choose publication
-dates and a save folder, and press **Build draft GTFS**. Follow progress, review
-grouped findings, download the ZIP/receipt/CSV, or use the result in the inspector.
-Recent builds remain available after restarting, separately from the index cache.
+## What it does
 
-The experimental builder also has a `merge_gtfs.py` command. Both interfaces use
-the same source-only algorithm and provide an optional independent comparison
-with a historical final after generation. See [MERGE_BUILDER.md](MERGE_BUILDER.md)
-for the interface, Windows commands, field rules, exclusions and limitations.
-Supplied archives remain read-only; candidate files are always newly named.
+- Inspect a single source or final GTFS feed, or review several exports together.
+- Browse routes, variations, trips, stops, calendars, shapes, and raw tables through an indexed viewer.
+- Compare bus exports using translated stop identifiers and ordered stop patterns.
+- Highlight missing stops, changed sequences, ambiguous mappings, and differences in stop attributes.
+- Compare source trips with a final feed, including operating dates, times, boarding rules, and shape geometry.
+- Inspect rail exports separately and compare them with the final feed.
+- Read HASTUS export diagnostics alongside the affected routes and trips.
+- Review archive health, core GTFS relationships, agency-specific checks, and optional MobilityData validator results.
+- Export findings and supporting records as JSON, CSV, Excel workbooks, and printable reports.
 
-### Individual feed inspection
+## Main areas
 
-The **Individual feeds** tab checks every supplied export independently:
+- **Individual feeds:** Review each export's contents, technical findings, route health, and source diagnostics.
+- **Source comparison:** Investigate bus variations and stop mappings with both source records available for context.
+- **Rail review:** Follow rail routes, trips, service calendars, and differences against the final feed.
+- **Final validation:** Keep technical findings, agency expectations, and canonical validator results distinct.
+- **Merge candidate builder:** Produce a new draft feed with a receipt documenting source matches, warnings, exclusions, and validation findings.
 
-- **Overview:** input identity, inventory, technical findings, agency review
-  items and unexpected content (including rail in a bus export without needing
-  a separate rail file). Unsupplied inputs say **Not supplied**.
-- **File health:** every ZIP member, row and column counts, coverage of checks,
-  findings and a link to the searchable raw table. Additional tables remain
-  browsable even when no table-specific validation rules are implemented.
-- **Route health:** trips, shapes, directions and route-specific findings;
-  open every variation and trip in the indexed local viewer. Feed-level findings
-  remain separate, so a route without assigned findings is not a full-feed pass.
-- **Findings:** search by rule/file/trip, filter by level, open the affected
-  CSV record in a popup, then jump to the full file or route. Each feed has its
-  own downloadable inspection JSON.
-- **HASTUS export diagnostics:** automatically reads `error_warning.txt` from
-  a bus or rail HASTUS ZIP as text, preserving original messages and line numbers.
-  Recognizes the 11 warning/error conditions in the reviewed OIG, including its
-  French templates where provided. Unknown messages remain visible for review.
-  Source severity is separate from confirmed GTFS defects: station-code usage,
-  source descriptions and internal scheduling conditions are not automatically
-  promoted into GTFS specification errors. Stop warnings show exported stop and
-  parent-station attributes; route and service evidence is linked when possible.
-  Missing shape references are checked even without a log, grouped by route,
-  direction and shape, with trip counts, complete trip fields, stop-time counts,
-  original source messages and links to full trips / route variations. Download
-  all affected trips or one group as an Excel-compatible CSV. This detects broken
-  references, not proof of downstream trip loss. No OIG execution or Java needed.
-  The index schema changed for text-log support: an older saved index rebuilds
-  once after this update, then the corrected index and audit can be reused.
-- **Source → final:** when only one bus source is supplied, compare its trips
-  with the optional final, including operating-date coverage, ordered stops,
-  times/boarding rules, trip attributes and shape geometry. Rail uses its
-  dedicated comparison. When both bus sources exist, use the three-column
-  variation comparison. Extra final-only service is not presumed erroneous
-  without the missing source or an expected-service baseline.
+The application also includes my [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) for reading feed files with coloured columns and issue highlights.
 
-Source inspection does not enforce final publication requirements for
-`feed_info.txt` or shapes. Missing optional headsign/shape values are agency
-review items, not universal required-field errors. Referenced records and
-incomplete trips/geometry are still checked. Standards coverage is focused on
-the core schedule tables; this is not a replacement for the optional canonical
-MobilityData validator on the final feed. Source checks need no Java.
+## Review limits
 
-Both bus inputs are needed **only for comparison**, not for inspection:
+I designed the tool to make evidence easier to inspect, rather than treat every difference as a confirmed service defect. An unpaired variation needs review; it does not by itself prove that service is missing. Agency-specific expectations are shown separately from GTFS requirements.
 
-1. CleverCAD export (`CW-…zip`)
-2. HASTUS export (`GTFS_…zip`)
+The merge builder is experimental. Its output is a draft for review, and a successful build does not establish publication approval. Core schedule checks are focused in scope; unavailable validation engines are reported explicitly.
 
-After the vendor produces the merged feed, a final merged/publication GTFS can be supplied as an optional third input for post-merge verification.
+## Attribution
 
-All supplied archives are read-only and remain on the workstation.
-
-### Separate HASTUS rail export
-
-The optional **HASTUS rail export ZIP** is independent of the bus sources. It
-can be opened alone, alongside the bus sources, or with a final merged GTFS.
-The **Rail variations & trips** tab displays every rail route, variation, trip,
-stop sequence, calendar and local shape plot. Rail is compared only with the
-final GTFS; without a final, it is explicitly marked **Not compared**.
-
-Final comparisons check missing trips and operating dates within the final
-publication window, ordered stops, times, trip/route/stop attributes and shape
-geometry. Both complete trip records remain inspectable. Renamed trip and
-shape IDs do not automatically indicate missing service. Rail routes appearing
-in either bus export are flagged separately and excluded from bus-pattern
-comparisons. No station-code-only matching is used for rail platforms.
-
-The interface also accepts **only a final ZIP**: leave both source paths empty
-and select **Validate & inspect**. The existing Python validator checks the file
-and the Local feed viewer lets you browse routes, variations, individual trips,
-stops, shapes, and paginated GTFS tables. Shapes use an offline coordinate plot.
-
-When all three feeds are supplied, open a route variation to see a final column
-alongside CleverCAD and HASTUS. The final pattern selector lists exact source
-pattern matches first, with other final patterns available for manual review.
-Multiple final patterns can preserve different source variations; the interface
-does not claim the vendor chose one source for the entire route. Source labels
-mean stop-pattern equivalence, not proof of vendor intent or schedule equality.
-
-Source-only variations open their own stop sequence. The Local feed viewer can
-inspect all their trips and shapes, even when no counterpart exists.
-The **Missing in HASTUS** tab includes stops labelled **Only in CleverCAD** in
-paired stop comparisons; **Missing in CAD** includes **Only in HASTUS**.
-Reports group affected variations by route and list the missing stop names,
-IDs and beginning/middle/end positions, with direction, shapes and trip counts.
-This is occurrence-level absence from the paired stop sequence, not necessarily
-absence from `stops.txt`. Unpaired patterns are separately labelled for review.
-Stop replacements and time/attribute changes are not silently classified as
-missing in both exports. **View** opens a keyboard-accessible popup with every source
-trip, full route/trip/stop/boarding attributes, calendar exceptions and an
-offline shape map. Closing it restores the same list, search and scroll
-position. Full CAD/HASTUS sequences remain visible with missing stops highlighted.
-Optional final-pattern evidence remains inspectable in the popup.
-
-Each report has its own search and exports the full matching list:
-
-- **Export Excel** downloads a real `.xlsx` workbook with report provenance,
-  variations, routes, every underlying trip and stop-time row, stop attributes,
-  shapes and calendars. Stop-time and shape worksheets stream locally in
-  batches. IDs are stored as text and cannot execute as spreadsheet formulas.
-- **PDF / print report** opens a printable local report. Select **Print / save
-  as PDF**, then **Microsoft Print to PDF** or your browser's **Save as PDF**.
-  It includes every listed variation and its representative trip sequence;
-  Excel provides all underlying trip records. No Java or Office installation
-  is needed to generate either report.
-
-Unpaired patterns mean no suitable counterpart was found, not confirmed missing
-service. Other paired mismatches stay in Route variations. Stop mapping and the
-separate rail comparison are unaffected. Original GTFS ZIPs are never edited.
-
-Your [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) is bundled at
-`http://127.0.0.1:8765/file-viewer/`, accessible from the Local feed viewer.
-It supports opening ZIPs directly, coloured columns, virtual scrolling, feed
-checks, and issue highlights. Its files are read directly in the browser and
-never uploaded. No Node installation is needed to run the bundled viewer.
-Build attribution is recorded in THIRD_PARTY.md.
-
-### Fast local browsing
-
-During the first audit, the **Preparing fast browsing** stage streams each
-archive into a disk-backed SQLite index. Routes, trips, comparison
-evidence, shapes, and raw-table pages then use indexed lookups rather than
-repeatedly decompressing and scanning entire GTFS tables. The original ZIPs
-are never edited or unpacked into your project directory.
-
-With **Save indexes** enabled, all supplied feeds (both bus sources, the optional
-final and the optional rail source) are saved automatically. SHA-256 content fingerprints and a schema version
-prevent reuse for changed feeds. Reopening after restarting reuses the saved
-database. Completed audits are also saved and reused on the same day when all
-feed fingerprints, validation settings, agency reference, engine files and code
-match. **Run fresh validation** overrides reuse. A new day or changed input runs
-fresh validation while still reusing unchanged indexes. Disabling saving uses temporary
-indexes. First-time indexing still takes time.
-
-Windows storage: `%LOCALAPPDATA%\GTFS Merge Auditor\cache`. Override with
-`GTFS_VALIDATOR_CACHE_DIR`. Parsed feed data stays on disk, potentially larger
-than uncompressed GTFS. The cache has a 10 GB budget and removes unused entries
-older than 30 days when saving new indexes. Active indexes are protected.
-**Remove unused saved indexes** reclaims storage without deleting original ZIPs.
-If saving fails or the budget is exceeded, browsing uses a session-only index
-and shows a warning.
-
-### Final merged GTFS validation
-
-The **Final GTFS validation** tab separates three independent checks:
-
-- Existing technical and ZIP checks.
-- Your supplied Python agency profile, grouped by file, with expandable evidence.
-  Row findings open the local table at that CSV row. Your supplied
-  `routes_sort_order_list.csv` is bundled; a local override is available.
-  Agency expectations, known exceptions and empty-field rules are not universal
-  GTFS requirements. Friday/one-month release policy can be disabled independently.
-- MobilityData's canonical validator, run as a local Java process, with notice
-  groups, sample evidence and downloadable reports. Unavailable engines and
-  failures are explicitly reported, never represented as passes.
-
-The validation date is configurable. Large profile tables are processed in
-25,000-row batches. Each file keeps up to 250 examples per severity; counts
-include all findings. MobilityData provides its own sampled notices. Download
-final validation evidence separately from the source-comparison report.
-No feed is uploaded to MobilityData.
-
-## Windows setup and launch
-
-Pasted file paths can include surrounding double quotes, single quotes, or
-typographic quotation marks (for example Explorer's **Copy as path**). The app
-removes only matching outer quotes, preserving spaces and apostrophes inside
-filenames. This applies to feed ZIPs, the optional JAR/reference CSV and Java
-configuration.
-
-The **Source stop-sequence mismatch** filter is available in Route health and
-the Investigation centre. Choose any sequence mismatch, beginning, middle or
-end. It filters routes, paired variations and findings. Opened variations and
-finding details always show the full trip/stop sequence, with the selected
-mismatch locations highlighted. Other differences and all stop evidence remain
-visible for context.
-Beginning/end refer to leading/trailing differing blocks; middle changes occur
-between matched stops. Insertions do not make all later rows mismatches.
-Multiple differing sections can put one variation in several filters.
-Source-only patterns, schedule differences and stop-attribute differences are
-not classified by this source-pattern filter. Clear it to inspect matching
-variations and other findings again.
-
-Requirements: Windows 10/11 and Python 3.10 or newer from <https://www.python.org/downloads/windows/>. During Python installation, enable **Add Python to PATH** and install the Python launcher.
-
-Double-click:
-
-```text
-start_windows.bat
-```
-
-The launcher checks Python, installs pandas and tzdata from `requirements.txt`
-if missing, starts the server, and opens <http://127.0.0.1:8765>. Keep the command
-window open while using the tool. Press `Ctrl+C` to stop it.
-
-For MobilityData checks, install Java 17 or newer and run
-`setup_mobilitydata.bat` once. It downloads the CLI JAR from MobilityData's
-official GitHub release into `.local-tools` (not committed to Git). Alternatively,
-supply an existing local CLI JAR path in the form. The Java process has a 2 GB
-heap cap and 15-minute timeout; large feeds need sufficient RAM and temporary
-disk space. Internet is needed for initial dependency/JAR setup only; all feed
-processing runs locally.
-
-### Restricted Windows PCs: use Eclipse's existing Java
-
-If your agency allows its Eclipse runtime to run outside the IDE, no Java
-installation or system PATH edit is needed:
-
-1. Double-click `configure_java.bat` once.
-2. Paste the Eclipse folder containing `eclipse.exe` (not the plugins folder).
-   The script reads `eclipse.ini`, locates the runtime and verifies Java 17+.
-   A full `java.exe` path or JDK folder also works.
-3. Double-click `setup_mobilitydata.bat` once to download the CLI JAR.
-4. From then on, double-click `start_windows.bat` normally.
-
-The selection is saved in `%LOCALAPPDATA%\GTFS Merge Auditor\settings.json`,
-outside the repository. Both MobilityData setup and validation read this setting
-directly, even in a newly opened command window. No global environment settings
-are modified. If Eclipse moves or removes that runtime, rerun configuration.
-An already-downloaded CLI JAR is reused by setup without another download.
-
-## Command line
-
-Required pre-vendor source audit:
-
-```powershell
-py -3 -m gtfs_validator audit "C:\GTFS\CW-EXPORT.zip" "C:\GTFS\HASTUS-EXPORT.zip" --output source-report.json
-```
-
-Optional source plus final-feed audit:
-
-```powershell
-py -3 -m gtfs_validator audit "C:\GTFS\CW-EXPORT.zip" "C:\GTFS\HASTUS-EXPORT.zip" "C:\GTFS\FINAL-MERGED.zip" --output merge-report.json
-```
-
-Final-feed-only technical validation:
-
-```powershell
-py -3 -m gtfs_validator validate "C:\GTFS\FINAL-MERGED.zip" --output final-report.json
-```
-
-Exit codes are `0` for eligible, `1` for needs review, and `2` for blocked.
-
-## Reconciliation model
-
-Source comparison rules are generic, not route- or incident-specific. Previous
-incidents are test cases for general rules. The optional supplied agency profile
-retains your agency's known exceptions and is labeled separately. CleverCAD and
-HASTUS are required only for source comparison; final-only validation is supported.
-
-For stops, it builds a crosswalk from the source identifiers:
-
-- CleverCAD commonly uses the public/numeric value in `stop_id` and the operational code in `stop_code`.
-- HASTUS commonly uses the operational code in `stop_id` and a public/station value in `stop_code`.
-- The final feed is checked against both direct identifiers and the resulting crosswalk.
-
-The audit currently detects:
-
-- ambiguous CleverCAD-to-HASTUS stop mappings;
-- source stops missing from the final feed;
-- source name or coordinate disagreement;
-- equivalent CleverCAD/HASTUS journeys with different ordered stop patterns;
-- ambiguous cross-source identifier mappings.
-
-When the optional final feed is supplied, it additionally detects:
-
-- source stops missing from the final feed and final stops with no source;
-- final stop names/coordinates matching neither source;
-- lost HASTUS station, platform, location-type, or stop-code metadata;
-- final routes, trips, shapes, or services with no source record;
-- changed final stop patterns, times, or pickup/drop-off rules;
-- HASTUS trip identifiers whose service suffix is removed by the merge;
-- all final-feed ZIP, structure, relationship, coordinate, and stop-time issues.
-
-## Final artifact checks
-
-- ZIP CRC, duplicate members, unsafe paths, encryption, compression limits, and root layout
-- stored and system-extracted readability (`0600` is blocked; `0644` recommended;
-  `0666` is readable; absent Windows/DOS Unix modes are informational)
-- required files/columns, UTF-8 and CSV structure, empty tables, and primary keys
-- route/trip/service/shape/stop and parent-station relationships
-- stop coordinates and route colours
-- stop-time syntax, arrival/departure order, duplicate sequences, and nondecreasing trip times
-- orphan shapes
-- grouped issue cards and progressive loading so large reports remain navigable
-- route-health dashboard covering healthy, mismatched, and non-comparable routes
-- route-variation inventory based on translated ordered stop patterns, with trip counts and source shape IDs
-- all-versus-specific variation impact classification and one-click variation filtering
-- compact variation tabs for mismatched, matching, and source-only patterns, with on-demand stop-by-stop comparison
-- route-level direction alignment inferred from translated stop patterns, including feeds that use opposite `direction_id` conventions
-- variation pairing based on translated stop-sequence similarity, so an added terminal stop or different headsign does not prevent comparison
-- an explicit ambiguous-pairing state when more than one counterpart is similarly plausible
-- route sorting by route number, attention priority, or variation count
-- a dedicated stop-mapping tab for names, coordinates, accessibility, platform, station, zone, and descriptive attribute differences
-- clickable evidence drawers with full source stop records
-- offline coordinate maps for mapped-stop location disagreements
-- aligned trip comparisons that distinguish missing, extra, changed, and schedule-different stops
-- expandable mismatch evidence with every available stops.txt field from both exports
-- selection exports and a purpose-built affected-stops CSV
-- searchable findings and complete JSON/CSV report downloads
-
-## Current next steps
-
-The next comparison layers are calendar expansion on actual operating dates, duplicate passenger-journey detection, and stop-to-shape alignment. These remain generic source-consistency checks rather than rules tied to a particular route or incident.
-
-## Privacy and safety
-
-- The server binds to `127.0.0.1` only.
-- It makes no outbound requests and uses no telemetry or CDN assets.
-- Audit inputs are local paths. The advanced viewer opens a user-selected ZIP
-  directly in browser memory; neither mode sends feed data off the workstation.
-- ZIP paths are screened before any system extraction test.
-- Technical/source checks use Python's standard library; the agency profile uses
-  pandas and tzdata. MobilityData uses a local Java runtime and CLI JAR.
+Bundled components and validation-engine attribution are recorded in [THIRD_PARTY.md](THIRD_PARTY.md).
