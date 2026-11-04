@@ -19,6 +19,7 @@ The application brings together individual feed inspection, CleverCAD and HASTUS
 ## Main areas
 
 - **Individual feeds:** Review each export's contents, technical findings, route health, and source diagnostics.
+- **Schedule calendar** shows Bus, Line 1, and Lines 2 & 4 by service date. Filter a route to verify its trips, calendar exceptions, and exported colors.
 - **Source comparison:** Investigate bus variations and stop mappings with both source records available for context.
 - **Rail review:** Follow rail routes, trips, service calendars, and differences against the final feed.
 - **Final validation:** Keep technical findings, agency expectations, and canonical validator results distinct.

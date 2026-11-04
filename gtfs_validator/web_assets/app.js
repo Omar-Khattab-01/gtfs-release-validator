@@ -301,6 +301,7 @@ function renderReport(report, id) {
   renderRouteHealth(report.stats?.trip_reconciliation?.route_health || []);
   renderMissingReports();
   renderIndividualFeeds(report);
+  setupSchedule(report.stats?.individual_feeds || {});
   renderStopMapping(report.stats?.stop_crosswalk || {});
   renderRail(report.stats?.rail);
   renderIssueGroups();
@@ -834,11 +835,12 @@ document.querySelectorAll('.workspace-tab').forEach(tab => tab.addEventListener(
   document.querySelector('#route-view').classList.toggle('hidden', tab.dataset.view !== 'routes');
   document.querySelector('#stop-view').classList.toggle('hidden', tab.dataset.view !== 'stops');
   document.querySelector('#viewer-view').classList.toggle('hidden', tab.dataset.view !== 'viewer');
+  document.querySelector('#schedule-view').classList.toggle('hidden', tab.dataset.view !== 'schedule');
   document.querySelector('#final-view').classList.toggle('hidden', tab.dataset.view !== 'final');
   document.querySelector('#rail-view').classList.toggle('hidden', tab.dataset.view !== 'rail');
   document.querySelector('#inspection-view').classList.toggle('hidden',tab.dataset.view!=='inspection');
   for (const missing of ['cad','hastus']) document.querySelector(`#missing-${missing}-view`).classList.toggle('hidden', tab.dataset.view !== `missing-${missing}`);
-  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view.startsWith('missing-') || tab.dataset.view==='inspection');
+  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view.startsWith('missing-') || ['inspection','schedule'].includes(tab.dataset.view));
 }));
 stopMappingSearch.addEventListener('input', () => { stopMappingLimit = 80; renderStopMappingRows(); });
 stopMappingFilter.addEventListener('change', () => { stopMappingLimit = 80; renderStopMappingRows(); });

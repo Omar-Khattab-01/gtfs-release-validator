@@ -32,6 +32,7 @@ from .inspection import add_inspections
 from .source_final import compare_source_final
 from .hastus_diagnostics import export_trips
 from . import build_web
+from .schedule import calendar_day, calendar_month, calendar_trips
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -212,7 +213,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.15.0"
+    server_version = "GTFSValidator/0.16.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -281,6 +282,29 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown run"})
             if len(parts) == 3:
                 return self._json(HTTPStatus.OK, job.public())
+            if len(parts) == 4 and parts[3] == 'calendar':
+                query = parse_qs(parsed_url.query)
+                source = query.get('source', ['final'])[0]
+                feed_path = {'cad': job.clevercad_path, 'hastus': job.hastus_path,
+                             'rail': job.rail_path, 'final': job.final_path}.get(source)
+                if not feed_path:
+                    return self._json(HTTPStatus.BAD_REQUEST, {'error': 'This export was not supplied'})
+                try:
+                    index = get_index(feed_path)
+                    search = query.get('search', [''])[0]
+                    day_text = query.get('date', [''])[0]
+                    route_id = query.get('route_id', [''])[0]
+                    if day_text:
+                        day = date.fromisoformat(day_text)
+                        if route_id:
+                            data = calendar_trips(index, day, route_id, query.get('service_id', [''])[0])
+                        else:
+                            data = calendar_day(index, day, search)
+                    else:
+                        data = calendar_month(index, query.get('month', [''])[0], search)
+                    return self._json(HTTPStatus.OK, data)
+                except (OSError, ValueError, KeyError, csv.Error, sqlite3.Error, zipfile.BadZipFile) as exc:
+                    return self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {'error': f'Could not read the schedule calendar: {exc}'})
             if len(parts)==4 and parts[3] in {'inspection-report.json','inspection-row','hastus-trips.csv'}:
                 query=parse_qs(parsed_url.query)
                 source=str((query.get('source') or [''])[0]);path={'cad':job.clevercad_path,'hastus':job.hastus_path,'rail':job.rail_path,'final':job.final_path}.get(source)

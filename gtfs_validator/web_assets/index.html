@@ -79,6 +79,7 @@
 
       <nav class="workspace-tabs" aria-label="Audit views">
         <button type="button" class="workspace-tab active" data-view="inspection" aria-selected="true">Individual feeds</button>
+        <button type="button" class="workspace-tab" data-view="schedule" aria-selected="false">Schedule calendar</button>
         <button type="button" class="workspace-tab" data-view="routes" aria-selected="false">Route variations</button>
         <button type="button" class="workspace-tab" data-view="missing-hastus" aria-selected="false">Missing in HASTUS</button>
         <button type="button" class="workspace-tab" data-view="missing-cad" aria-selected="false">Missing in CAD</button>
@@ -87,6 +88,24 @@
         <button type="button" class="workspace-tab" data-view="final" aria-selected="false">Final GTFS validation</button>
         <button type="button" class="workspace-tab" data-view="rail" aria-selected="false">Rail variations &amp; trips</button>
       </nav>
+      <section class="panel schedule-panel hidden" id="schedule-view" aria-labelledby="schedule-title">
+        <div class="section-heading"><div><h3 id="schedule-title">Schedule calendar</h3></div></div>
+        <p class="quiet">Check scheduled routes by service date. Select a day or a service group to see its routes and trips.</p>
+        <div class="schedule-controls">
+          <label>Export<select id="schedule-source"></select></label>
+          <label>Find a route<input id="schedule-search" type="search" placeholder="Route number or name"></label>
+          <label>Jump to date<input id="schedule-date" type="date"></label>
+        </div>
+        <p class="quiet" id="schedule-coverage"></p>
+        <div class="schedule-month-nav">
+          <button class="button secondary" type="button" id="schedule-prev" aria-label="Previous month">‹ Previous</button>
+          <h4 id="schedule-month"></h4>
+          <button class="button secondary" type="button" id="schedule-next" aria-label="Next month">Next ›</button>
+        </div>
+        <p id="schedule-status" class="quiet" aria-live="polite"></p>
+        <div class="schedule-scroll"><div id="schedule-grid" class="schedule-grid"></div></div>
+        <p class="quiet">+ Added service · − Removed service · Times after midnight stay with their GTFS service date.</p>
+      </section>
       <section class="panel" id="inspection-view">
         <h3>Individual feed inspection</h3><p id="inspection-workflow"></p>
         <div id="inspection-sources" class="route-grid"></div>
@@ -252,10 +271,15 @@
     <div id="missing-dialog-body"></div>
   </dialog>
   <dialog id="inspection-dialog" aria-labelledby="inspection-dialog-title"><div class="drawer-header"><h2 id="inspection-dialog-title">Feed evidence</h2><button type="button" id="inspection-dialog-close" aria-label="Close feed evidence">×</button></div><div id="inspection-dialog-body"></div></dialog>
-  <footer><span>GTFS Merge Auditor 0.15.0</span><span>Bound to localhost · no network services</span></footer>
+  <dialog id="schedule-dialog" aria-labelledby="schedule-dialog-title">
+    <div class="drawer-header"><div><p class="eyebrow" id="schedule-dialog-source"></p><h2 id="schedule-dialog-title"></h2></div><button type="button" id="schedule-dialog-close" class="close-button" aria-label="Close schedule details">×</button></div>
+    <div class="schedule-dialog-body" id="schedule-dialog-body" aria-live="polite"></div>
+  </dialog>
+  <footer><span>GTFS Merge Auditor 0.16.0</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
   <script src="/assets/missing-reports.js" defer></script>
   <script src="/assets/inspection.js" defer></script>
   <script src="/assets/build.js" defer></script>
+  <script src="/assets/schedule.js" defer></script>
 </body>
 </html>
