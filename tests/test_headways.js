@@ -31,3 +31,27 @@ test('Hidden feed viewer defers indexing until the user opens it',async()=>{
   await setup({'Final merged GTFS':{path:'final.zip'}});
   assert.equal(0,loads);assert.equal('final',select.value);assert.ok(select.options[1].disabled);
 });
+
+
+test('Selecting a rail station shows destination labels and the boarding direction returned by the server',async()=>{
+  const nodes={};
+  const node=selector=>nodes[selector] ||= {innerHTML:'',textContent:'',value:'',options:[{value:'0'}],
+    addEventListener(){},replaceChildren(){},checkValidity(){return true;}};
+  node('#headway-source').value='rail';node('#headway-route').value='line1';
+  node('#headway-date').value='2026-11-04';node('#headway-direction').value='0';
+  node('#headway-stop').value='terminus:Blair';
+  let query;
+  const data={route:{route_short_name:'1'},date:'2026-11-04',directions:['0','1'],direction:'1',
+    direction_labels:{'0':"Tunney's Pasture → Blair",'1':"Blair → Tunney's Pasture"},
+    direction_adjusted:true,rail:true,terminus_mode:false,measurement_name:'Blair',
+    stops:[{stop_id:'terminus:Blair',stop_name:'Blair',trip_count:10}],stop_id:'terminus:Blair',
+    trips:[],departures:[],headways:{},issues:[],hourly:[],block_count:0};
+  await vm.runInNewContext(source+'\nloadHeadways()',{
+    document:{querySelector:node},URLSearchParams,escapeHtml:escape,currentRunId:'test',
+    fetch:async url=>{query=new URL(url,'http://localhost').searchParams;return {ok:true,json:async()=>data};}
+  });
+  assert.equal('0',query.get('direction'));assert.equal('terminus:Blair',query.get('stop_id'));
+  assert.equal('1',node('#headway-direction').value);
+  assert.ok(node('#headway-direction').innerHTML.includes('Blair → Tunney&#39;s Pasture'));
+  assert.ok(node('#headway-status').textContent.includes('Direction switched to boarding departures'));
+});

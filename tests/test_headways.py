@@ -80,6 +80,81 @@ class HeadwayTests(unittest.TestCase):
         self.assertEqual(600, result['headways']['median'])
         self.assertIn('block_overlap', {item['kind'] for item in result['issues']})
 
+    def rail_index(self, line='1', parents=True):
+        names = {'tw': "TUNNEY'S PASTURE O-TRAIN EAST / EST", 'ta': "TUNNEY'S PASTURE O-TRAIN",
+                 'be': 'BLAIR O-TRAIN EAST / EST', 'bw': 'BLAIR O-TRAIN WEST / OUEST',
+                 'trim': 'TRIM O-TRAIN WEST / OUEST', 'middle': 'RIDEAU O-TRAIN',
+                 'bay': 'BAYVIEW O-TRAIN SOUTH / SUD', 'lime': 'LIMEBANK O-TRAIN NORTH / NORD',
+                 'south': 'SOUTH KEYS O-TRAIN SOUTH / SUD', 'airport': 'AIRPORT O-TRAIN NORTH / AÉROPORT O-TRAIN NORD'}
+        parent_ids = {'tw':'tunney', 'ta':'tunney', 'be':'blair', 'bw':'blair'} if parents else {}
+        stops = 'stop_id,stop_name,parent_station,location_type\n'
+        stops += ''.join(f'{sid},{name},{parent_ids.get(sid, "")},0\n' for sid, name in names.items()
+                         if sid != 'trim' or 'trim' in self.times)
+        if parents:
+            stops += "tunney,TUNNEY'S PASTURE,,1\nblair,BLAIR,,1\n"
+        routes = FILES['routes.txt'].splitlines()[0] + f'\nr19,OCT,{line},Rail line {line},1,DA291C,FFFFFF\n'
+        write_feed(self.path, extra={'routes.txt':routes, 'stops.txt':stops,
+                                    'trips.txt':self.trips, 'stop_times.txt':self.times})
+        return FeedIndex(str(self.path))
+
+    def rail_trips(self):
+        for number, minute in enumerate([0, 10]):
+            self.trip(f'e{number}','0',[('tw',f'05:{minute:02}:00',0),('be',f'05:{minute+5:02}:00',1)], f'e{number}')
+            self.trip(f'w{number}','1',[('bw',f'05:{minute+3:02}:00',0),('ta',f'05:{minute+8:02}:00',1)], f'w{number}')
+        self.trip('short','0',[('middle','05:07:00',0),('be','05:09:00',1)], 'short')
+
+    def test_rail_defaults_to_origins_and_keeps_short_turns_visible(self):
+        self.rail_trips()
+        result = route_headways(self.rail_index(), date(2026,10,13), 'r19', 'all')
+        self.assertTrue(result['terminus_mode'])
+        self.assertEqual(4, len(result['departures']))
+        self.assertEqual(5, len(result['trips']))
+        self.assertEqual(1, result['not_at_stop'])
+        self.assertEqual(2, result['headways']['count'])
+        self.assertEqual(600, result['headways']['minimum'])
+        self.assertEqual("Tunney's Pasture → Blair", result['direction_labels']['0'])
+        self.assertEqual("Blair → Tunney's Pasture", result['direction_labels']['1'])
+        self.assertNotIn('Trim', {stop['stop_name'] for stop in result['stops']})
+
+    def test_blair_arrival_platform_or_parent_selects_boarding_direction(self):
+        self.rail_trips()
+        index = self.rail_index()
+        for stop in ['be', 'blair', 'terminus:Blair']:
+            result = route_headways(index, date(2026,10,13), 'r19', '0', stop)
+            self.assertTrue(result['direction_adjusted'])
+            self.assertEqual('1', result['direction'])
+            self.assertEqual(['bw','bw'], [item['stop_id'] for item in result['departures']])
+            self.assertEqual(600, result['headways']['median'])
+
+    def test_terminus_platforms_without_parent_station_are_grouped(self):
+        self.rail_trips()
+        result = route_headways(self.rail_index(parents=False), date(2026,10,13), 'r19', '0', 'be')
+        blair = next(stop for stop in result['stops'] if stop['stop_name'] == 'Blair')
+        self.assertEqual(['be','bw'], blair['stop_ids'])
+        self.assertEqual(2, len(result['departures']))
+
+    def test_future_trim_only_activates_when_served_and_gaps_do_not_mix_origins(self):
+        self.rail_trips()
+        self.trip('trim1','1',[('trim','05:08:00',0),('ta','05:28:00',1)], 'trim1')
+        self.trip('trim2','1',[('trim','05:18:00',0),('ta','05:38:00',1)], 'trim2')
+        result = route_headways(self.rail_index(), date(2026,10,13), 'r19', '1')
+        self.assertEqual({'Blair','Trim'}, {item['station_name'] for item in result['departures']})
+        self.assertEqual(600, result['headways']['minimum'])
+        self.assertEqual(2, result['headways']['count'])
+        self.assertEqual({'Blair','Trim'}, {item['station_name'] for item in result['hourly']})
+
+    def test_lines_two_and_four_measure_their_own_termini(self):
+        for line, start, end in [('2','bay','lime'), ('4','south','airport')]:
+            with self.subTest(line=line):
+                self.trips = self.trips.splitlines()[0] + '\n'
+                self.times = self.times.splitlines()[0] + '\n'
+                self.trip('out1','0',[(start,'05:00:00',0),(end,'05:20:00',1)],'out1')
+                self.trip('out2','0',[(start,'05:12:00',0),(end,'05:32:00',1)],'out2')
+                self.trip('back','1',[(end,'05:03:00',0),(start,'05:23:00',1)],'back')
+                result = route_headways(self.rail_index(line), date(2026,10,13), 'r19', 'all')
+                self.assertEqual(3, len(result['departures']))
+                self.assertEqual(720, result['headways']['median'])
+
 
 if __name__ == '__main__':
     unittest.main()

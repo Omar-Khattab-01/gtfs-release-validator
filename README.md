@@ -20,7 +20,7 @@ The application brings together individual feed inspection, CleverCAD and HASTUS
 
 - **Individual feeds:** Review each export's contents, technical findings, route health, and source diagnostics.
 - **Schedule calendar** shows Bus, Line 1, and Lines 2 & 4 by service date. Filter a route to verify its trips, calendar exceptions, and exported colors.
-- **Headways & blocks** calculates hourly departure counts and gaps from `stop_times.txt` for a selected date, direction and boarding stop. Review trip attributes, block IDs, overlapping block times, simultaneous departures and optional gap thresholds.
+- **Headways & blocks** calculates hourly departure counts and gaps from `stop_times.txt` for a selected date, direction and boarding stop. Lines 1, 2 and 4 default to terminus departures, with station platforms grouped and origin/destination names beside directions. Line 1 supports Tunney’s Pasture, Blair and future Trim when served; Line 2 uses Bayview and Limebank; Line 4 uses South Keys and Airport. Short trips remain visible, while gaps are kept separate for each originating terminus and direction. Review trip attributes, block IDs, overlapping block times, simultaneous departures and optional gap thresholds.
 - **Saved exports** reopens indexed paths and matching audits. Use **Manage saved exports** to offload an individual feed's index and related audits or all saved cache data.
 - **Source comparison:** Investigate bus variations and stop mappings with both source records available for context.
 - **Rail review:** Follow rail routes, trips, service calendars, and differences against the final feed.
