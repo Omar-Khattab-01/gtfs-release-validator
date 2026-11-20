@@ -27,6 +27,6 @@ if errorlevel 1 (
   )
 )
 
-echo Starting the local GTFS Validator...
+echo Starting the GTFS Validator from "%CD%"...
 py -3 -m gtfs_validator serve --open
 if errorlevel 1 pause

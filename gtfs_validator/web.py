@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import errno
 import io
 import json
 import mimetypes
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from . import __version__
 from .details import build_detail
 from .merge import validate_merge
 from .engine import validate_feed
@@ -222,7 +224,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.17.0"
+    server_version = f"GTFSValidator/{__version__}"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -630,11 +632,22 @@ class ValidatorHandler(BaseHTTPRequestHandler):
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False) -> None:
-    server = ThreadingHTTPServer((host, port), ValidatorHandler)
-    print(f"GTFS Validator is available at http://{host}:{port}")
+    try:
+        server = ThreadingHTTPServer((host, port), ValidatorHandler)
+    except OSError as exc:
+        if not (open_browser and host in {"127.0.0.1", "localhost", "::1"}
+                and (exc.errno == errno.EADDRINUSE or getattr(exc, "winerror", None) == 10048)):
+            raise
+        # Keep existing sessions intact and open this download's code on its own port.
+        server = ThreadingHTTPServer((host, 0), ValidatorHandler)
+        print(f"Port {port} is already in use. Opening this copy on port {server.server_port}.")
+    url_host = f"[{host}]" if ":" in host else host
+    url = f"http://{url_host}:{server.server_port}"
+    print(f"GTFS Validator {__version__} is available at {url}")
+    print(f"Application folder: {PACKAGE_ROOT.parent}")
     print("Press Ctrl+C to stop. Files stay on this computer.")
     if open_browser:
-        threading.Timer(0.4, webbrowser.open, args=(f"http://{host}:{port}",)).start()
+        threading.Timer(0.4, webbrowser.open, args=(url,)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

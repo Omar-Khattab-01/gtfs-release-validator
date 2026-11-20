@@ -28,6 +28,8 @@ The application brings together individual feed inspection, CleverCAD and HASTUS
 
 The application also includes my [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) for reading feed files with coloured columns and issue highlights.
 
+On Windows, extract an update into a fresh folder and run `start_windows.bat` there. The launcher prints the version and application folder. If the usual port is occupied, it opens this copy on a free local port; use the newly opened browser tab. The version is also shown at the top of the page. You can carry over `.local-tools` to retain the MobilityData JAR; saved Java settings remain in your user settings and do not select the app version.
+
 ## Review limits
 
 I designed the tool to make evidence easier to inspect, rather than treat every difference as a confirmed service defect. An unpaired variation needs review; it does not by itself prove that service is missing. Agency-specific expectations are shown separately from GTFS requirements.
