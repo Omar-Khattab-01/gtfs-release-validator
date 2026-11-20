@@ -2,7 +2,7 @@
 
 I built this tool to make GTFS exports easier to inspect before and after a feed is merged for publication. Transit data can be structurally valid and still lose a stop, change a trip pattern, or carry inconsistent information between scheduling systems. I wanted a way to trace those differences back to the source records.
 
-The application brings together individual feed inspection, CleverCAD and HASTUS bus comparisons, HASTUS rail review, final-feed validation, and an experimental merge candidate builder. Feed processing stays on the workstation, and the original archives remain unchanged.
+The application brings together individual feed inspection, CleverCAD and HASTUS bus comparisons, HASTUS rail review, final-feed validation, and scheduled headway checks. Feed processing stays on the workstation, and the original archives remain unchanged.
 
 ## What it does
 
@@ -20,10 +20,11 @@ The application brings together individual feed inspection, CleverCAD and HASTUS
 
 - **Individual feeds:** Review each export's contents, technical findings, route health, and source diagnostics.
 - **Schedule calendar** shows Bus, Line 1, and Lines 2 & 4 by service date. Filter a route to verify its trips, calendar exceptions, and exported colors.
+- **Headways & blocks** calculates hourly departure counts and gaps from `stop_times.txt` for a selected date, direction and boarding stop. Review trip attributes, block IDs, overlapping block times, simultaneous departures and optional gap thresholds.
+- **Saved exports** reopens indexed paths and matching audits. Use **Manage saved exports** to offload an individual feed's index and related audits or all saved cache data.
 - **Source comparison:** Investigate bus variations and stop mappings with both source records available for context.
 - **Rail review:** Follow rail routes, trips, service calendars, and differences against the final feed.
 - **Final validation:** Keep technical findings, agency expectations, and canonical validator results distinct.
-- **Merge candidate builder:** Produce a new draft feed with a receipt documenting source matches, warnings, exclusions, and validation findings.
 
 The application also includes my [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) for reading feed files with coloured columns and issue highlights.
 
@@ -31,7 +32,9 @@ The application also includes my [GTFS Viewer](https://github.com/Omar-Khattab-0
 
 I designed the tool to make evidence easier to inspect, rather than treat every difference as a confirmed service defect. An unpaired variation needs review; it does not by itself prove that service is missing. Agency-specific expectations are shown separately from GTFS requirements.
 
-The merge builder is experimental. Its output is a draft for review, and a successful build does not establish publication approval. Core schedule checks are focused in scope; unavailable validation engines are reported explicitly.
+Cached paths are checked using file identity, size, timestamps and short content samples. Changed inputs are hashed again. The fresh-validation option fully rechecks file fingerprints. Matching audits remain specific to the validation day and selected checks.
+
+The experimental merge builder is paused. Core schedule checks are focused in scope; unavailable validation engines are reported explicitly.
 
 ## Attribution
 

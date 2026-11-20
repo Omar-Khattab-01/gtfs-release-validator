@@ -10,6 +10,7 @@ from pathlib import Path
 from . import cache_store
 from .final_checks import DEFAULT_JAR, PACKAGE
 from .java_runtime import find_java
+from .source_cache import fingerprint as source_fingerprint
 
 
 def fingerprint(path: str | Path) -> dict:
@@ -25,11 +26,11 @@ def fingerprint(path: str | Path) -> dict:
     return {'path':str(resolved),'sha256':digest.hexdigest()}
 
 
-def identity(job) -> dict:
+def identity(job, *, verify_sources=False) -> dict:
     value = {'schema':1, 'today':date.today().isoformat(), 'platform':platform.system(),
              'validation_date':job.validation_date,'release_policy':job.release_policy,
              'run_agency':job.run_agency,'run_mobility':job.run_mobility,
-             'feeds':[fingerprint(path) if path else None for path in (job.clevercad_path,job.hastus_path,job.final_path,job.rail_path)],
+             'feeds':[source_fingerprint(path, verify=verify_sources) if path else None for path in (job.clevercad_path,job.hastus_path,job.final_path,job.rail_path)],
              'code':[fingerprint(path) for path in sorted(PACKAGE.glob('*.py'))]}
     if job.final_path and job.run_agency:
         value['reference'] = fingerprint(job.sort_reference or PACKAGE / 'routes_sort_order_list.csv')

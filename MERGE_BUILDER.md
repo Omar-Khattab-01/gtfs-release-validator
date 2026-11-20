@@ -1,3 +1,7 @@
+# Merge builder paused
+
+The experimental builder is currently disabled in the application and command-line launchers. The notes below document the archived implementation.
+
 # Build a local GTFS merge candidate
 
 `merge_gtfs.py` creates a new GTFS ZIP from CleverCAD, HASTUS bus and optional

@@ -18,10 +18,6 @@
   </header>
 
   <main>
-    <nav class="workflow-nav" aria-label="Main workflow">
-      <button type="button" class="active" data-workflow="inspect" aria-pressed="true">Inspect &amp; compare</button>
-      <button type="button" data-workflow="build" aria-pressed="false">Build merged GTFS</button>
-    </nav>
     <div id="inspect-workflow">
     <section class="hero">
       <div>
@@ -50,7 +46,7 @@
         </div>
         <fieldset class="validation-options"><legend>Local validation and saved indexes</legend>
           <label><input type="checkbox" id="save-indexes" checked> Save indexes for reuse after restarting (up to 10 GB, 30 days)</label>
-          <label><input type="checkbox" id="force-revalidate"> Run fresh validation even if identical results were saved today</label>
+          <label><input type="checkbox" id="force-revalidate"> Run fresh validation and fully verify saved-file fingerprints</label>
           <label><input type="checkbox" id="run-agency" checked> Run my agency checks on the final GTFS</label>
           <label><input type="checkbox" id="run-mobility" checked> Run MobilityData locally on the final GTFS (Java 17+ and CLI JAR required)</label>
           <label><input type="checkbox" id="release-policy" checked> Enforce Friday release / one-month coverage policy</label>
@@ -58,6 +54,7 @@
           <label>MobilityData CLI JAR path <input id="mobility-jar" type="text" placeholder="Optional; otherwise use setup_mobilitydata.bat"></label>
           <label>Route-sort reference CSV <input id="sort-reference" type="text" placeholder="Optional override; your supplied reference is bundled"></label>
           <button type="button" id="cache-refresh">View saved-index storage</button>
+          <button type="button" id="cache-manage">Manage saved exports</button>
           <button type="button" id="cache-clear">Remove unused saved indexes</button><p id="cache-summary" aria-live="polite"></p>
         </fieldset>
         <div class="submit-row"><p class="field-help">Supply at least one ZIP. Every supplied export is checked and browsable on its own. CAD ↔ HASTUS comparison becomes available when both are supplied; add the final ZIP later for merge review. Rail remains a separate source.</p><button type="submit" id="run-button">Validate &amp; inspect</button></div>
@@ -80,6 +77,7 @@
       <nav class="workspace-tabs" aria-label="Audit views">
         <button type="button" class="workspace-tab active" data-view="inspection" aria-selected="true">Individual feeds</button>
         <button type="button" class="workspace-tab" data-view="schedule" aria-selected="false">Schedule calendar</button>
+        <button type="button" class="workspace-tab" data-view="headways" aria-selected="false">Headways &amp; blocks</button>
         <button type="button" class="workspace-tab" data-view="routes" aria-selected="false">Route variations</button>
         <button type="button" class="workspace-tab" data-view="missing-hastus" aria-selected="false">Missing in HASTUS</button>
         <button type="button" class="workspace-tab" data-view="missing-cad" aria-selected="false">Missing in CAD</button>
@@ -88,6 +86,20 @@
         <button type="button" class="workspace-tab" data-view="final" aria-selected="false">Final GTFS validation</button>
         <button type="button" class="workspace-tab" data-view="rail" aria-selected="false">Rail variations &amp; trips</button>
       </nav>
+      <section class="panel headway-panel hidden" id="headways-view" aria-labelledby="headways-title">
+        <h3 id="headways-title">Route frequency, headways &amp; blocks</h3>
+        <p>Review a route’s service on a selected date. Headways use boarding departures at the selected stop and are calculated separately for each direction.</p>
+        <div class="headway-controls">
+          <label>Export<select id="headway-source"></select></label>
+          <label>Route<select id="headway-route"></select></label>
+          <label>Service date<input id="headway-date" type="date"></label>
+          <label>Direction<select id="headway-direction"></select></label>
+          <label>Measure at stop<select id="headway-stop"></select></label>
+          <label>Flag gaps above (minutes)<input id="headway-threshold" type="number" min="0.01" max="1440" step="any" placeholder="Optional"></label>
+        </div>
+        <p id="headway-status" role="status"></p>
+        <div id="headway-content"></div>
+      </section>
       <section class="panel schedule-panel hidden" id="schedule-view" aria-labelledby="schedule-title">
         <div class="section-heading"><div><h3 id="schedule-title">Schedule calendar</h3></div></div>
         <p class="quiet">Check scheduled routes by service date. Select a day or a service group to see its routes and trips.</p>
@@ -209,53 +221,6 @@
       </section>
     </section>
     </div>
-    <section id="build-workflow" class="hidden" aria-labelledby="build-title">
-      <div class="hero">
-        <div><p class="kicker">Local merge builder</p><h2 id="build-title">Create your next GTFS.</h2>
-          <p class="lede">Choose your CAD and HASTUS exports. Build a merged draft, review the results, and open it in the inspector.</p></div>
-        <div class="scope-card"><span>Saved on this device</span><strong>Sources stay read-only</strong><small>Python only · no Java needed to build</small></div>
-      </div>
-      <div class="build-layout">
-        <section class="panel setup-panel">
-          <div class="section-heading"><div><span class="step">01</span><h3>Source exports</h3></div><button type="button" class="button secondary" id="build-use-inputs">Use inspector paths</button></div>
-          <form id="build-form">
-            <fieldset id="build-fields" class="build-fields">
-              <div class="build-inputs">
-                <div><label for="build-cad">CleverCAD bus ZIP <span class="required-note">Required</span></label><div class="path-control"><input id="build-cad" name="cad_path" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\CW.zip"><button type="button" class="button secondary" data-pick="zip" data-target="build-cad">Browse…</button></div></div>
-                <div><label for="build-hastus">HASTUS bus ZIP <span class="required-note">Required</span></label><div class="path-control"><input id="build-hastus" name="hastus_path" required autocomplete="off" spellcheck="false" placeholder="C:\GTFS\HASTUS-BUS.zip"><button type="button" class="button secondary" data-pick="zip" data-target="build-hastus">Browse…</button></div></div>
-                <div><label for="build-rail">HASTUS rail ZIP <span class="optional">Optional</span></label><div class="path-control"><input id="build-rail" name="rail_path" autocomplete="off" spellcheck="false" placeholder="Add the separate rail export for a complete agency feed"><button type="button" class="button secondary" data-pick="zip" data-target="build-rail">Browse…</button></div></div>
-              </div>
-              <p class="field-help">Browse opens a file window on this computer. You can also paste paths, including Windows “Copy as path” quotes.</p>
-              <h4 class="build-section-title">Publication window</h4>
-              <div class="build-two-columns"><label>First service date<input type="date" id="build-start" name="start_date" required></label><label>Last service date<input type="date" id="build-end" name="end_date" required></label></div>
-              <p class="field-help">Calendars and exceptions will be limited to this window. Times such as 24:00 keep their GTFS service date.</p>
-              <h4 class="build-section-title">Save your output</h4>
-              <label for="build-directory">Save folder</label><div class="path-control"><input id="build-directory" name="output_directory" autocomplete="off" spellcheck="false"><button type="button" class="button secondary" data-pick="folder" data-target="build-directory">Browse…</button></div>
-              <label class="build-filename" for="build-name">New ZIP filename <span class="optional">Optional</span><input id="build-name" name="output_name" placeholder="Leave blank for a unique filename" autocomplete="off"></label>
-              <details class="build-advanced"><summary>Optional comparison and custom settings</summary>
-                <p class="field-help">A reference final is used only to compare the completed output. It does not supply data to the merge.</p>
-                <label for="build-reference">Known final ZIP for comparison</label><div class="path-control"><input id="build-reference" name="reference_path" autocomplete="off" spellcheck="false" placeholder="Optional historical final"><button type="button" class="button secondary" data-pick="zip" data-target="build-reference">Browse…</button></div>
-                <label for="build-policy">Custom merge policy JSON</label><div class="path-control"><input id="build-policy" name="policy_path" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the agency defaults"><button type="button" class="button secondary" data-pick="policy" data-target="build-policy">Browse…</button></div>
-                <label for="build-sort">Route-sort reference CSV</label><div class="path-control"><input id="build-sort" name="sort_reference" autocomplete="off" spellcheck="false" placeholder="Your supplied route order is bundled"><button type="button" class="button secondary" data-pick="csv" data-target="build-sort">Browse…</button></div>
-              </details>
-            </fieldset>
-            <p id="build-error" class="build-error hidden" role="alert"></p>
-            <div class="submit-row"><p class="field-help">Creates a draft ZIP and review report. Existing files are kept. Review the draft before publication.</p><button type="submit" id="build-submit">Build draft GTFS</button></div>
-          </form>
-        </section>
-        <aside class="build-sidebar">
-          <section class="panel build-note"><p class="kicker">Merge rules</p><h3>Know what is included.</h3><p>Bus schedules, IDs and geometry come from CAD. Supported destinations and boarding metadata come from HASTUS. Rail is added from its separate export.</p><div id="build-policy-summary"></div><p class="quiet">The current profile does not merge fares or translations. Omitted content and uncertain matches appear in the review report.</p></section>
-          <section class="panel build-note"><div class="build-history-heading"><h3>Recent builds</h3><button type="button" class="text-button" id="build-refresh">Refresh</button></div><p class="quiet">History stays on this device after restarting. It is separate from the index cache.</p><div id="build-history"><p class="quiet">Loading build history…</p></div></section>
-        </aside>
-      </div>
-      <section id="build-progress-panel" class="panel build-progress hidden" aria-live="polite">
-        <div class="build-status-heading"><div><p class="kicker" id="build-status-label">Build progress</p><h3 id="build-progress-title"></h3></div><div class="spinner" id="build-spinner" aria-hidden="true"></div></div>
-        <ol id="build-stages" class="build-stages" aria-label="Build stages"></ol>
-        <p id="build-progress-message"></p><p id="build-elapsed" class="quiet"></p>
-        <details><summary>Activity log</summary><pre id="build-log"></pre></details>
-      </section>
-      <section id="build-result" class="hidden" aria-live="polite"></section>
-    </section>
   </main>
   <div class="drawer-backdrop hidden" id="drawer-backdrop">
     <aside class="detail-drawer" id="detail-drawer" aria-labelledby="detail-title">
@@ -275,11 +240,16 @@
     <div class="drawer-header"><div><p class="eyebrow" id="schedule-dialog-source"></p><h2 id="schedule-dialog-title"></h2></div><button type="button" id="schedule-dialog-close" class="close-button" aria-label="Close schedule details">×</button></div>
     <div class="schedule-dialog-body" id="schedule-dialog-body" aria-live="polite"></div>
   </dialog>
-  <footer><span>GTFS Merge Auditor 0.16.0</span><span>Bound to localhost · no network services</span></footer>
+  <dialog id="cache-dialog" aria-labelledby="cache-dialog-title">
+    <div class="drawer-header"><div><p class="eyebrow">Local storage</p><h2 id="cache-dialog-title">Saved exports &amp; indexes</h2></div><button type="button" id="cache-dialog-close" class="close-button" aria-label="Close saved exports">×</button></div>
+    <div class="cache-dialog-body"><p>Offloading removes the saved browsing index and related audits. Opening that export again rebuilds its index.</p><p id="cache-manager-status" role="status"></p><div id="cache-feed-list"></div><button type="button" id="cache-offload-all" class="button secondary">Offload all saved data</button></div>
+  </dialog>
+  <footer><span>GTFS Merge Auditor 0.17.0</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
   <script src="/assets/missing-reports.js" defer></script>
   <script src="/assets/inspection.js" defer></script>
-  <script src="/assets/build.js" defer></script>
   <script src="/assets/schedule.js" defer></script>
+  <script src="/assets/headways.js" defer></script>
+  <script src="/assets/cache-manager.js" defer></script>
 </body>
 </html>

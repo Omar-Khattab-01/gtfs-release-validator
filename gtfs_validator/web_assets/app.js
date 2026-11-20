@@ -67,7 +67,8 @@ async function setupViewer(inputs) {
   const names = {final:'Final merged GTFS', cad:'CleverCAD', hastus:'HASTUS',rail:'HASTUS rail'};
   for (const option of source.options) option.disabled = !inputs[names[option.value]];
   source.value = [...source.options].find(option => !option.disabled)?.value || 'final';
-  await loadViewer();
+  viewerInventory = {routes: [], files: []};
+  if (!document.querySelector('#viewer-view').classList.contains('hidden')) await loadViewer();
 }
 
 async function loadViewer() {
@@ -301,6 +302,7 @@ function renderReport(report, id) {
   renderRouteHealth(report.stats?.trip_reconciliation?.route_health || []);
   renderMissingReports();
   renderIndividualFeeds(report);
+  setupHeadways(report.stats?.individual_feeds || {});
   setupSchedule(report.stats?.individual_feeds || {});
   renderStopMapping(report.stats?.stop_crosswalk || {});
   renderRail(report.stats?.rail);
@@ -836,11 +838,13 @@ document.querySelectorAll('.workspace-tab').forEach(tab => tab.addEventListener(
   document.querySelector('#stop-view').classList.toggle('hidden', tab.dataset.view !== 'stops');
   document.querySelector('#viewer-view').classList.toggle('hidden', tab.dataset.view !== 'viewer');
   document.querySelector('#schedule-view').classList.toggle('hidden', tab.dataset.view !== 'schedule');
+  document.querySelector('#headways-view').classList.toggle('hidden', tab.dataset.view !== 'headways');
+  if (tab.dataset.view === 'viewer' && !viewerInventory.routes.length) loadViewer();
   document.querySelector('#final-view').classList.toggle('hidden', tab.dataset.view !== 'final');
   document.querySelector('#rail-view').classList.toggle('hidden', tab.dataset.view !== 'rail');
   document.querySelector('#inspection-view').classList.toggle('hidden',tab.dataset.view!=='inspection');
   for (const missing of ['cad','hastus']) document.querySelector(`#missing-${missing}-view`).classList.toggle('hidden', tab.dataset.view !== `missing-${missing}`);
-  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view.startsWith('missing-') || ['inspection','schedule'].includes(tab.dataset.view));
+  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view.startsWith('missing-') || ['inspection','schedule','headways'].includes(tab.dataset.view));
 }));
 stopMappingSearch.addEventListener('input', () => { stopMappingLimit = 80; renderStopMappingRows(); });
 stopMappingFilter.addEventListener('change', () => { stopMappingLimit = 80; renderStopMappingRows(); });

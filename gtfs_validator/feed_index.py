@@ -8,7 +8,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-import hashlib
 import os
 import shutil
 import sqlite3
@@ -22,6 +21,7 @@ from pathlib import Path
 
 from .archive import MAX_MEMBER_BYTES, MAX_TOTAL_BYTES, is_unsafe_name
 from . import cache_store
+from . import source_cache
 from .hastus_diagnostics import LOG_NAME, LOG_LIMIT, decode_log
 
 
@@ -171,24 +171,28 @@ def get_index(path: str, *, persist: bool = False) -> FeedIndex:
     # Serialize first builds: concurrent clicks must not import the same ZIP twice.
     with _lock:
         index = _indexes.get(key)
+        if index is not None and persist and index.database.name.startswith('index-v2-'):
+            expected = f"index-v2-{source_cache.fingerprint(resolved)['sha256']}.sqlite"
+            if index.database.name != expected:
+                index = None
         if index is None or (persist and index.cache_status == "Session only"):
             destination = None
             warning = ""
-            if persist:
-                try:
+            try:
+                destination = source_cache.saved_index(resolved, remember=persist)
+                if persist and destination is None:
                     root = cache_store.cache_root()
                     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-                    digest = hashlib.sha256()
-                    with resolved.open("rb") as source:
-                        for block in iter(lambda: source.read(1024 * 1024), b""):
-                            digest.update(block)
-                    destination = root / f"index-v2-{digest.hexdigest()}.sqlite"
-                    if index is None and destination.is_file() and not destination.is_symlink():
-                        try:
-                            index = FeedIndex.reopen(str(resolved), destination)
-                        except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
-                            index = None  # An interrupted/corrupt cache is rebuilt, never trusted.
-                except OSError as exc:
+                    digest = source_cache.fingerprint(resolved)['sha256']
+                    destination = root / f"index-v2-{digest}.sqlite"
+                if index is None and destination and destination.is_file() and not destination.is_symlink():
+                    try:
+                        index = FeedIndex.reopen(str(resolved), destination)
+                    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+                        index = None
+            except OSError as exc:
+                destination = None
+                if persist:
                     warning = f"Could not save index: {exc}"
             new_session = index is None
             if new_session:
@@ -237,9 +241,56 @@ def cache_info(remove_unused: bool = False) -> dict:
         active = {item.database for item in _live}
         cleanup = cache_store.prune(active, remove_all=True) if remove_unused else None
         items = cache_store.entries()
+        paths = source_cache.paths_by_index()
+        for item in items:
+            item['paths'] = paths.get(item['name'], [])
         return {"directory": str(cache_store.cache_root()), "entries": items,
                 "bytes": sum(item["bytes"] for item in items), "limit_bytes": cache_store.MAX_BYTES,
                 "retention_days": 30, "cleanup": cleanup}
+
+
+def offload_cache(name=''):
+    """Release idle readers before removing derived files, including on Windows."""
+    if name and (not cache_store.NAME.fullmatch(name) or not name.startswith('index-')):
+        raise ValueError('Select a saved feed index')
+    with _lock:
+        keys = [key for key in _indexes if not name or _indexes[key].database.name == name]
+        for key in keys:
+            del _indexes[key]
+        protected = {item.database.name for item in _live}
+        targets = {name} if name else {item['name'] for item in cache_store.entries()}
+        if name and name not in protected:
+            digest = name.removeprefix('index-v2-').removesuffix('.sqlite')
+            for item in cache_store.entries():
+                if not item['name'].startswith('audit-'):
+                    continue
+                path = cache_store.cache_root() / item['name']
+                try:
+                    if item['bytes'] > 128 * 1024**2:
+                        continue
+                    identity = json.loads(path.read_text(encoding='utf-8')).get('identity', {})
+                    if any(feed and feed.get('sha256') == digest for feed in identity.get('feeds', [])):
+                        targets.add(item['name'])
+                except (OSError, ValueError, AttributeError):
+                    continue
+        removed, skipped = [], []
+        for target in sorted(targets):
+            if target in protected:
+                skipped.append(target)
+                continue
+            path = cache_store.cache_root() / target
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                path.unlink()
+                removed.append(target)
+            except OSError:
+                skipped.append(target)
+        forgotten = removed if name else set(source_cache.paths_by_index()) - protected
+        source_cache.forget_indexes(forgotten)
+    result = cache_info()
+    result['cleanup'] = {'removed': removed, 'skipped': skipped}
+    return result
 
 
 def clear_indexes() -> None:

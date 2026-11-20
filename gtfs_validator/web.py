@@ -21,9 +21,10 @@ from .details import build_detail
 from .merge import validate_merge
 from .engine import validate_feed
 from . import viewer
-from .feed_index import get_index, clear_indexes, cache_info
+from .feed_index import get_index, clear_indexes, cache_info, offload_cache
 from .final_checks import agency_checks, mobility_checks, offline_mobility_report
 from . import audit_cache
+from . import source_cache
 from .input_paths import normalize_path
 from .rail import audit_rail, trip_evidence
 from .models import ValidationReport
@@ -31,8 +32,8 @@ from .missing_reports import missing_report, variation_evidence, export_excel, p
 from .inspection import add_inspections
 from .source_final import compare_source_final
 from .hastus_diagnostics import export_trips
-from . import build_web
-from .schedule import calendar_day, calendar_month, calendar_trips
+from .schedule import calendar_day, calendar_month, calendar_trips, service_bounds
+from .headways import route_headways
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -97,8 +98,33 @@ def _run_job(job: Job) -> None:
         job.status = "running"
         job.progress = "Validating ZIPs and comparing exports"
     try:
+        feeds = (("CleverCAD", job.clevercad_path), ("HASTUS", job.hastus_path),
+                 ("Final GTFS", job.final_path), ("HASTUS rail", job.rail_path))
+        cache_identity = None
+        if job.save_indexes:
+            with job.lock:
+                job.progress = 'Checking saved paths and validation results'
+            try:
+                cache_identity = audit_cache.identity(job, verify_sources=job.force_revalidate)
+                saved = None if job.force_revalidate else audit_cache.load(cache_identity)
+                if saved:
+                    statuses = [{'source': label, 'status': 'Reused saved index' if source_cache.saved_index(path)
+                                 else 'Browsing index will be prepared when opened', 'warning': ''}
+                                for label, path in feeds if path]
+                    with job.lock:
+                        job.index_status = statuses
+                        job.report = saved['report']
+                        job.final_validation = saved.get('final_validation')
+                        job.audit_cache_status = 'Reused saved audit: unchanged inputs/settings, same validation day.'
+                        job.status, job.progress = 'complete', 'Ready — reopened saved audit'
+                    return
+                job.audit_cache_status = 'Running fresh checks (no matching saved audit, or fresh checks requested).'
+            except (OSError, ValueError) as exc:
+                job.audit_cache_status = f'Saved audit unavailable: {exc}'
+        if job.force_revalidate:
+            clear_indexes()
         index_errors = []
-        for label, path in (("CleverCAD", job.clevercad_path), ("HASTUS", job.hastus_path), ("Final GTFS", job.final_path), ("HASTUS rail",job.rail_path)):
+        for label, path in feeds:
             if not path:
                 continue
             with job.lock:
@@ -109,23 +135,6 @@ def _run_job(job: Job) -> None:
             except (OSError, KeyError, ValueError, UnicodeError, csv.Error, zipfile.BadZipFile, RuntimeError, sqlite3.Error) as exc:
                 # A malformed feed must still display its validation findings.
                 index_errors.append(f"{label}: {exc}")
-        cache_identity = None
-        if job.save_indexes:
-            with job.lock:
-                job.progress = "Verifying input fingerprints for saved validation results"
-            try:
-                cache_identity = audit_cache.identity(job)
-                saved = None if job.force_revalidate or index_errors else audit_cache.load(cache_identity)
-                if saved:
-                    with job.lock:
-                        job.report = saved['report']
-                        job.final_validation = saved.get('final_validation')
-                        job.audit_cache_status = 'Reused saved audit: unchanged inputs/settings, same validation day.'
-                        job.status, job.progress = 'complete', 'Ready — reused saved indexes and audit'
-                    return
-                job.audit_cache_status = 'Running fresh checks (no matching saved audit, or fresh checks requested).'
-            except (OSError,ValueError) as exc:
-                job.audit_cache_status = f'Saved audit unavailable: {exc}'
         with job.lock:
             job.progress = "Validating ZIPs and comparing exports"
         if job.clevercad_path and job.hastus_path:
@@ -213,7 +222,7 @@ def _find_job(job_id: str) -> Job | None:
 
 
 class ValidatorHandler(BaseHTTPRequestHandler):
-    server_version = "GTFSValidator/0.16.0"
+    server_version = "GTFSValidator/0.17.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -265,23 +274,46 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             return self._serve_asset(name)
 
         parts = [part for part in path.split("/") if part]
-        if parts[:2] == ['api', 'builds']:
-            try:
-                if len(parts) == 2:
-                    return self._json(HTTPStatus.OK, build_web.list_builds())
-                if len(parts) == 3:
-                    return self._json(HTTPStatus.OK, build_web.get_build(parts[2]))
-                if len(parts) == 5 and parts[3] == 'download':
-                    return self._download_file(build_web.artifact(parts[2], parts[4]))
-            except (OSError, ValueError, KeyError) as exc:
-                return self._json(HTTPStatus.NOT_FOUND, {'error': str(exc)})
-            return self._json(HTTPStatus.NOT_FOUND, {'error': 'Unknown build resource'})
         if len(parts) >= 3 and parts[:2] == ["api", "runs"]:
             job = _find_job(parts[2])
             if job is None:
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown run"})
             if len(parts) == 3:
                 return self._json(HTTPStatus.OK, job.public())
+            if len(parts) == 4 and parts[3] == 'headways':
+                query = parse_qs(parsed_url.query, keep_blank_values=True)
+                source = query.get('source', ['final'])[0]
+                feed_path = {'cad': job.clevercad_path, 'hastus': job.hastus_path,
+                             'rail': job.rail_path, 'final': job.final_path}.get(source)
+                if not feed_path:
+                    return self._json(HTTPStatus.BAD_REQUEST, {'error': 'This export was not supplied'})
+                try:
+                    route = query.get('route_id', [''])[0]
+                    if not route:
+                        index = get_index(feed_path)
+                        first, last = service_bounds(index)
+                        catalog = viewer.inventory(feed_path)
+                        return self._json(HTTPStatus.OK, {'routes': catalog['routes'], 'first_date': first.isoformat(),
+                                                         'last_date': last.isoformat(),
+                                                         'date': min(max(date.today(), first), last).isoformat()})
+                    day = date.fromisoformat(query.get('date', [''])[0])
+                    direction = query.get('direction', [None])[0]
+                    stop = query.get('stop_id', [''])[0]
+                    threshold = query.get('threshold', [''])[0]
+                    threshold = float(threshold) if threshold else None
+                    key = ('headways', source, day.isoformat(), route, direction, stop, threshold)
+                    with job.lock:
+                        data = job.viewer_cache.get(key)
+                    if data is None:
+                        data = route_headways(get_index(feed_path), day, route, direction, stop, threshold)
+                        with job.lock:
+                            old_keys = [item for item in job.viewer_cache if item[0] == 'headways']
+                            for old_key in old_keys[:-3]:
+                                del job.viewer_cache[old_key]
+                            job.viewer_cache[key] = data
+                    return self._json(HTTPStatus.OK, data)
+                except (OSError, ValueError, KeyError, csv.Error, sqlite3.Error, zipfile.BadZipFile) as exc:
+                    return self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {'error': f'Could not inspect headways: {exc}'})
             if len(parts) == 4 and parts[3] == 'calendar':
                 query = parse_qs(parsed_url.query)
                 source = query.get('source', ['final'])[0]
@@ -483,7 +515,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request_path = urlparse(self.path).path
-        if request_path not in {"/api/runs", "/api/cache/clear", '/api/builds', '/api/builds/pick'}:
+        if request_path not in {"/api/runs", "/api/cache/clear", '/api/cache/offload'}:
             return self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
         if self.headers.get("X-GTFS-Validator") != "1":
             return self._json(HTTPStatus.FORBIDDEN, {"error": "Missing local request header"})
@@ -499,15 +531,24 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid JSON"})
         if not isinstance(payload, dict):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Expected a JSON object"})
-        if request_path in {'/api/builds', '/api/builds/pick'}:
-            try:
-                if request_path.endswith('/pick'):
-                    return self._json(HTTPStatus.OK, build_web.pick_path(str(payload.get('kind', ''))))
-                return self._json(HTTPStatus.ACCEPTED, build_web.start_build(payload))
-            except (OSError, ValueError, KeyError) as exc:
-                return self._json(HTTPStatus.BAD_REQUEST, {'error': str(exc)})
         if request_path == "/api/cache/clear":
             return self._json(HTTPStatus.OK, cache_info(remove_unused=True))
+        if request_path == '/api/cache/offload':
+            with JOBS_LOCK:
+                busy = any(job.status in {'queued', 'running'} for job in JOBS.values())
+            if busy:
+                return self._json(HTTPStatus.CONFLICT, {'error': 'Wait for the current inspection to finish before offloading its cache.'})
+            try:
+                result = offload_cache(str(payload.get('name') or ''))
+                with JOBS_LOCK:
+                    for job in JOBS.values():
+                        with job.lock:
+                            job.viewer_cache.clear()
+                            job.details_cache.clear()
+                            job.variation_cache.clear()
+                return self._json(HTTPStatus.OK, result)
+            except (OSError, ValueError) as exc:
+                return self._json(HTTPStatus.BAD_REQUEST, {'error': str(exc)})
         validation_date = str(payload.get("validation_date") or date.today().isoformat())
         try:
             date.fromisoformat(validation_date)

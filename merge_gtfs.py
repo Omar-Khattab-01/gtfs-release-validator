@@ -1,7 +1,6 @@
-"""Windows-friendly entry point. Run `python merge_gtfs.py --help`."""
+"""Retired entry point for the paused experimental merge builder."""
 import sys
-from gtfs_validator.__main__ import main
 
-if __name__=='__main__':
-    sys.argv.insert(1,'build-release')
-    main()
+if __name__ == "__main__":
+    print("The merge builder is paused. Open start_windows.bat to inspect and validate exports.", file=sys.stderr)
+    raise SystemExit(1)

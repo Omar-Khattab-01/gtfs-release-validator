@@ -172,7 +172,15 @@ function renderScheduleDay(data, key, service = '') {
     target.textContent = 'Loading trip details…';
     try {
       const result = await scheduleFetch({date:data.date, route_id:routes[Number(details.dataset.routeIndex)].route_id, service_id:service});
-      if (target.isConnected) scheduleTripTable(target, result.trips);
+      if (target.isConnected) {
+        scheduleTripTable(target, result.trips);
+        const headways = document.createElement('button');
+        headways.type = 'button';
+        headways.className = 'button secondary';
+        headways.textContent = 'Headways & blocks';
+        headways.addEventListener('click', () => openHeadways(scheduleSource.value, data.date, routes[Number(details.dataset.routeIndex)].route_id));
+        target.prepend(headways);
+      }
     } catch (error) {
       target.textContent = error.message;
       delete details.dataset.loaded;

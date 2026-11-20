@@ -117,17 +117,27 @@ def calendar_day(index, day, search):
     return _day_rows(index, day, day, search)[0]
 
 
-def calendar_trips(index, day, route_id, service_id):
+def route_schedule(index, day, route_id, service_id=''):
     services, _ = _services(index, (day, day))
     active = {service for service, dates in services.items() if day.isoformat() in dates}
-    trips = [trip for trip in index.lookup('trips.txt', route_id)
+    records = [{str(key).strip(): str(value or '').strip() for key, value in row.items()}
+               for row in index.lookup('trips.txt', route_id)]
+    trips = [trip for trip in records
              if trip.get('service_id', '').strip() in active and (not service_id or trip['service_id'].strip() == service_id)]
     times = defaultdict(list)
     if 'stop_times.txt' in index.columns:
         for row in index.lookup_many('stop_times.txt', list({trip['trip_id'].strip() for trip in trips})):
+            row = {str(key).strip(): str(value or '').strip() for key, value in row.items()}
             times[row['trip_id'].strip()].append(row)
+    for calls in times.values():
+        calls.sort(key=lambda row: _sequence(row.get('stop_sequence')))
+    return trips, times
+
+
+def calendar_trips(index, day, route_id, service_id):
+    trips, times = route_schedule(index, day, route_id, service_id)
     for trip in trips:
-        calls = sorted(times[trip['trip_id'].strip()], key=lambda row: _sequence(row.get('stop_sequence')))
+        calls = times[trip['trip_id'].strip()]
         for prefix, call in (('first', calls[0] if calls else {}), ('last', calls[-1] if calls else {})):
             stop_id = (call.get('stop_id') or '').strip()
             trip[prefix + '_stop_id'] = stop_id
