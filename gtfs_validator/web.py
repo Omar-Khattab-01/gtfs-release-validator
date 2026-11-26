@@ -108,7 +108,7 @@ def _run_job(job: Job) -> None:
         job.status = "running"
         job.started_at = time.monotonic()
         job.progress_percent = 2
-        job.progress = "Validating ZIPs and comparing exports"
+        job.progress = "Preparing validation"
     try:
         feeds = (("CleverCAD", job.clevercad_path), ("HASTUS", job.hastus_path),
                  ("Final GTFS", job.final_path), ("HASTUS rail", job.rail_path))
@@ -152,7 +152,10 @@ def _run_job(job: Job) -> None:
                 # A malformed feed must still display its validation findings.
                 index_errors.append(f"{label}: {exc}")
         with job.lock:
-            job.progress = "Comparing exports"
+            job.progress = ("Comparing CleverCAD and HASTUS bus" if job.clevercad_path and job.hastus_path
+                            else "Validating final GTFS" if job.final_path
+                            else f"Validating {supplied[0][0]}" if len(supplied) == 1
+                            else "Validating supplied exports")
             job.progress_percent = 30
         def comparison_progress(message, percent):
             with job.lock:
@@ -164,6 +167,9 @@ def _run_job(job: Job) -> None:
             if job.final_path:
                 report.stats['final_technical_findings']=[item.to_dict() for item in report.findings]
             if job.rail_path:
+                with job.lock:
+                    job.progress = ("Comparing HASTUS rail against final GTFS" if job.final_path
+                                    else "Validating HASTUS rail")
                 try:
                     report.stats['rail']=audit_rail(job.rail_path,job.final_path,job.clevercad_path,job.hastus_path,report)
                 except (OSError,ValueError,KeyError) as exc:
@@ -186,7 +192,8 @@ def _run_job(job: Job) -> None:
         if job.final_path and not (job.clevercad_path and job.hastus_path):
             for source,path in (('cad',job.clevercad_path),('hastus',job.hastus_path)):
                 if not path:continue
-                inspection_progress(f'Comparing {source} against final GTFS')
+                label = {'cad': 'CleverCAD', 'hastus': 'HASTUS bus'}[source]
+                inspection_progress(f'Comparing {label} against final GTFS')
                 try:
                     comparison=compare_source_final(path,job.final_path)
                     report.stats.setdefault('source_final',{})[source]=comparison

@@ -1134,12 +1134,13 @@ def validate_exports(
     progress=None,
 ) -> ValidationReport:
     final_value = str(final_path).strip() if final_path is not None else ""
-    if progress: progress("Checking final GTFS", 0)
     if final_value:
+        if progress: progress("Validating final GTFS", 0)
         report = validate_feed(final_value)
         report.stats["final_technical_findings"] = [item.to_dict() for item in report.findings]
         report.profile = "oc-transpo-source-and-final-audit"
     else:
+        if progress: progress("Preparing CleverCAD and HASTUS bus comparison", 0)
         report = ValidationReport(
             source_path=f"CleverCAD: {clevercad_path} | HASTUS: {hastus_path}",
             profile="oc-transpo-source-preflight",
@@ -1176,7 +1177,7 @@ def validate_exports(
             if progress: progress("Reading HASTUS trip patterns", 50)
             hastus_summaries = _trip_summaries(hastus, hastus_translation, report)
             final_summaries = _trip_summaries(final, {}, report) if final else None
-            if progress: progress("Comparing stops and final coverage", 65)
+            if progress: progress("Comparing stops and final coverage" if final else "Comparing CleverCAD and HASTUS stops", 65)
             _audit_stops(cad, hastus, final, report)
             if final:
                 _audit_entity_provenance(cad, hastus, final, report, rail)
