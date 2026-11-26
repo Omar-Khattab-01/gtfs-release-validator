@@ -238,6 +238,7 @@ def _trip_summaries(
     closed: set[str] = set()
     current_id: str | None = None
     current_rows: list[tuple[int, str, str, str, str, str, str]] = []
+    pattern_fingerprints: dict[tuple[str, ...], str] = {}
 
     def finish() -> bool:
         nonlocal current_id, current_rows
@@ -248,15 +249,16 @@ def _trip_summaries(
             current_rows = []
             return True
         current_rows.sort(key=lambda item: item[0])
-        stops_digest = hashlib.sha256()
-        schedule_digest = hashlib.sha256()
-        for position, (sequence, stop_id, arrival, departure, pickup, dropoff, source_stop_id) in enumerate(current_rows, start=1):
-            # A variation is the ordered translated stop pattern. Source exports
-            # may number the same sequence differently, so use list position.
-            stops_digest.update(f"{position}|{stop_id}\n".encode())
-            schedule_digest.update(
-                f"{sequence}|{stop_id}|{arrival}|{departure}|{pickup}|{dropoff}\n".encode()
-            )
+        translated_stops = tuple(row[1] for row in current_rows)
+        fingerprint = pattern_fingerprints.get(translated_stops)
+        if fingerprint is None:
+            fingerprint = hashlib.sha256(''.join(f"{position}|{stop}\n" for position, stop in enumerate(translated_stops, 1)).encode()).hexdigest()
+            pattern_fingerprints[translated_stops] = fingerprint
+        # Preserve the exact fingerprint byte stream while avoiding millions of
+        # per-row dictionary allocations and tiny hash updates.
+        schedule_digest = hashlib.sha256(''.join(
+            f"{sequence}|{stop}|{arrival}|{departure}|{pickup}|{dropoff}\n"
+            for sequence, stop, arrival, departure, pickup, dropoff, _ in current_rows).encode())
         first = current_rows[0]
         last = current_rows[-1]
         canonical = _source_trip_id(meta)
@@ -270,8 +272,8 @@ def _trip_summaries(
             last_time=last[2] or last[3],
             shape_id=meta.get("shape_id", ""),
             stop_count=len(current_rows),
-            stop_sequence=tuple(row[1] for row in current_rows),
-            stop_fingerprint=stops_digest.hexdigest(),
+            stop_sequence=translated_stops,
+            stop_fingerprint=fingerprint,
             schedule_fingerprint=schedule_digest.hexdigest(),
             source_stop_sequence=tuple(row[6] for row in current_rows),
         )
@@ -283,8 +285,17 @@ def _trip_summaries(
     try:
         with feed.archive.open("stop_times.txt") as raw:
             text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
-            for row_number, row in enumerate(csv.DictReader(text), start=2):
-                trip_id = (row.get("trip_id") or "").strip()
+            reader = csv.reader(text)
+            headers = next(reader, [])
+            positions = {name: position for position, name in enumerate(headers)}
+            columns = [positions.get(name, len(headers)) for name in
+                       ('trip_id','stop_id','stop_sequence','arrival_time','departure_time','pickup_type','drop_off_type')]
+            trip_col, stop_col, sequence_col, arrival_col, departure_col, pickup_col, dropoff_col = columns
+            width = max(columns) + 1
+            for row_number, row in enumerate((row for row in reader if row), start=2):
+                if len(row) < width:
+                    row.extend([''] * (width-len(row)))
+                trip_id = row[trip_col].strip()
                 if trip_id != current_id:
                     finish()
                     if trip_id in closed:
@@ -300,21 +311,21 @@ def _trip_summaries(
                         )
                         return {}
                     current_id = trip_id
-                stop_id = (row.get("stop_id") or "").strip()
+                stop_id = row[stop_col].strip()
                 feed.used_stop_ids.add(stop_id)
                 translated_stop = stop_translate.get(stop_id, stop_id)
                 try:
-                    sequence = int((row.get("stop_sequence") or "").strip())
+                    sequence = int(row[sequence_col].strip())
                 except ValueError:
                     continue
                 current_rows.append(
                     (
                         sequence,
                         translated_stop,
-                        (row.get("arrival_time") or "").strip(),
-                        (row.get("departure_time") or "").strip(),
-                        (row.get("pickup_type") or "").strip(),
-                        (row.get("drop_off_type") or "").strip(),
+                        row[arrival_col].strip(),
+                        row[departure_col].strip(),
+                        row[pickup_col].strip(),
+                        row[dropoff_col].strip(),
                         stop_id,
                     )
                 )
@@ -1120,8 +1131,10 @@ def validate_exports(
     hastus_path: str | Path,
     final_path: str | Path | None = None,
     rail_path: str | Path | None = None,
+    progress=None,
 ) -> ValidationReport:
     final_value = str(final_path).strip() if final_path is not None else ""
+    if progress: progress("Checking final GTFS", 0)
     if final_value:
         report = validate_feed(final_value)
         report.stats["final_technical_findings"] = [item.to_dict() for item in report.findings]
@@ -1131,6 +1144,7 @@ def validate_exports(
             source_path=f"CleverCAD: {clevercad_path} | HASTUS: {hastus_path}",
             profile="oc-transpo-source-preflight",
         )
+    if progress: progress("Reading source exports", 15)
     cad = _load_source(clevercad_path, "CleverCAD", report)
     hastus = _load_source(hastus_path, "HASTUS", report)
     final = _load_source(final_value, "Final merged GTFS", report) if final_value else None
@@ -1155,14 +1169,19 @@ def validate_exports(
                 source.routes=[row for row in source.routes if row.get('route_id') not in excluded]
                 source.trips=[row for row in source.trips if row.get('route_id') not in excluded]
         if cad and hastus:
+            if progress: progress("Mapping source stops", 25)
             hastus_translation = _hastus_stop_translation(cad, hastus)
+            if progress: progress("Reading CleverCAD trip patterns", 35)
             cad_summaries = _trip_summaries(cad, {}, report)
+            if progress: progress("Reading HASTUS trip patterns", 50)
             hastus_summaries = _trip_summaries(hastus, hastus_translation, report)
             final_summaries = _trip_summaries(final, {}, report) if final else None
+            if progress: progress("Comparing stops and final coverage", 65)
             _audit_stops(cad, hastus, final, report)
             if final:
                 _audit_entity_provenance(cad, hastus, final, report, rail)
             if cad_summaries and hastus_summaries and (final_summaries or final is None):
+                if progress: progress("Comparing route variations and trips", 80)
                 _audit_trip_patterns(cad_summaries, hastus_summaries, final_summaries, report,
                                      {row['stop_id']:row for row in cad.stops},{row['stop_id']:row for row in hastus.stops})
     finally:
@@ -1177,6 +1196,7 @@ def validate_merge(
     hastus_path: str | Path,
     final_path: str | Path | None = None,
     rail_path: str | Path | None = None,
+    progress=None,
 ) -> ValidationReport:
     """Backward-compatible alias for the optional-final export audit."""
-    return validate_exports(clevercad_path, hastus_path, final_path, rail_path)
+    return validate_exports(clevercad_path, hastus_path, final_path, rail_path, progress=progress)

@@ -88,15 +88,40 @@ def _direction_labels(index, trips, calls, stations, stop_keys):
             for direction, origin in origins.items()}
 
 
-def route_headways(index, day, route_id, direction=None, stop_id='', threshold=None):
+def _variations(index, trips, calls):
+    patterns = defaultdict(list)
+    for trip in trips:
+        ordered = calls[trip['trip_id'].strip()]
+        key = (trip.get('direction_id', '').strip(), tuple(call.get('stop_id', '').strip() for call in ordered),
+               trip.get('shape_id', '').strip())
+        patterns[key].append(trip)
+    variations, trip_variation = [], {}
+    for number, (key, members) in enumerate(sorted(patterns.items()), 1):
+        direction, stops, shape = key
+        ident = f'V{number}'
+        name = lambda sid: index.stops.get(sid, {}).get('stop_name', sid)
+        variations.append({'variation_id': ident, 'direction_id': direction, 'shape_id': shape,
+                           'stop_count': len(stops), 'trip_count': len(members),
+                           'origin': name(stops[0]) if stops else '', 'destination': name(stops[-1]) if stops else ''})
+        trip_variation.update((trip['trip_id'].strip(), ident) for trip in members)
+    return variations, trip_variation
+
+
+def route_headways(index, day, route_id, direction=None, stop_id='', threshold=None, variation_id=''):
     routes = {route['route_id']: route for route in index.rows('routes.txt')}
     if route_id not in routes:
         raise ValueError('Select a route from this export')
     if threshold is not None and not 0 < threshold <= 1440:
         raise ValueError('Gap threshold must be between 0 and 1440 minutes')
     trips, calls = route_schedule(index, day, route_id)
+    variations, trip_variations = _variations(index, trips, calls)
+    chosen_variation = next((item for item in variations if item['variation_id'] == variation_id), None)
+    if variation_id and chosen_variation is None:
+        raise ValueError('This variation is not active on the selected date')
     directions = sorted({trip.get('direction_id', '').strip() for trip in trips}, key=_sequence)
     selected_direction = direction if direction is not None else next(iter(directions), '')
+    if chosen_variation and selected_direction != 'all':
+        selected_direction = chosen_variation['direction_id']
     if selected_direction != 'all' and selected_direction not in directions and directions:
         raise ValueError('This direction has no trip records on the selected date')
     rail = _rail_route(routes[route_id])
@@ -104,7 +129,7 @@ def route_headways(index, day, route_id, direction=None, stop_id='', threshold=N
     labels = _direction_labels(index, trips, calls, stations, stop_keys)
     default_termini = rail and bool(TERMINI.get(routes[route_id].get('route_short_name', '').strip()))
     direction_adjusted = False
-    if rail and stop_id and stop_id != '@termini':
+    if rail and stop_id and stop_id not in {'@termini', '@origins'}:
         # Accept a raw platform or parent station ID as well as station selector IDs.
         stop_id = stop_keys.get(stop_id, stop_id)
         if stop_id not in stations:
@@ -112,10 +137,11 @@ def route_headways(index, day, route_id, direction=None, stop_id='', threshold=N
                             if any(index.stops.get(sid, {}).get('parent_station', '').strip() == stop_id
                                    for sid in item['stop_ids'])), stop_id)
         boarding = stations.get(stop_id, {}).get('boarding', {})
-        if selected_direction != 'all' and boarding and not boarding.get(selected_direction):
+        if not chosen_variation and selected_direction != 'all' and boarding and not boarding.get(selected_direction):
             selected_direction = max(boarding, key=boarding.get)
             direction_adjusted = True
-    selected = [trip for trip in trips if selected_direction == 'all' or trip.get('direction_id', '').strip() == selected_direction]
+    selected = [trip for trip in trips if (selected_direction == 'all' or trip.get('direction_id', '').strip() == selected_direction)
+                and (not variation_id or trip_variations[trip['trip_id'].strip()] == variation_id)]
     issues = []
     stop_trips = defaultdict(set)
     stop_positions = defaultdict(list)
@@ -136,9 +162,10 @@ def route_headways(index, day, route_id, direction=None, stop_id='', threshold=N
         if default_termini:
             stops.insert(0, {'stop_id': '@termini', 'stop_name': 'Terminus departures (by direction)',
                              'trip_count': len(trips), 'terminus': True, 'stop_ids': []})
+    stops.insert(0, {'stop_id': '@origins', 'stop_name': 'Each variation’s departure station', 'trip_count': len(selected), 'stop_ids': []})
     if stop_id and stop_id not in {item['stop_id'] for item in stops}:
         raise ValueError('This stop is not served by the selected route and date')
-    selected_stop = stop_id or ('@termini' if default_termini else (stops[0]['stop_id'] if stops else ''))
+    selected_stop = stop_id or ('@origins' if rail or variation_id else (stops[1]['stop_id'] if len(stops)>1 else '@origins'))
     measurement_name = next((item['stop_name'] for item in stops if item['stop_id'] == selected_stop), '')
     departures = []
     records = []
@@ -153,11 +180,20 @@ def route_headways(index, day, route_id, direction=None, stop_id='', threshold=N
                'first_stop': index.stops.get(first.get('stop_id', '').strip(), {}).get('stop_name', first.get('stop_id', '')),
                'last_stop': index.stops.get(last.get('stop_id', '').strip(), {}).get('stop_name', last.get('stop_id', '')),
                'stop_count': len(ordered)}
+        row['variation_id'] = trip_variations[trip_id]
+        first_boarding = next((call for call in ordered if call.get('pickup_type', '').strip() != '1'
+                               and _clock(call.get('departure_time')) is not None), None)
+        row['origin_departure'] = ({'time': first_boarding.get('departure_time'), 'stop_id': first_boarding.get('stop_id'),
+                                    'stop_name': index.stops.get(first_boarding.get('stop_id', '').strip(), {}).get('stop_name', first_boarding.get('stop_id', ''))}
+                                   if first_boarding else None)
         records.append(row)
         for position, call in enumerate(ordered):
             sid = call.get('stop_id', '').strip()
             measurement = stop_keys.get(sid, sid)
-            if selected_stop == '@termini':
+            if selected_stop == '@origins':
+                if call is not first_boarding:
+                    continue
+            elif selected_stop == '@termini':
                 if position != 0 or not stations.get(measurement, {}).get('terminus'):
                     continue
             elif (measurement if rail else sid) != selected_stop:
@@ -240,6 +276,7 @@ def route_headways(index, day, route_id, direction=None, stop_id='', threshold=N
     return {'date': day.isoformat(), 'route': routes[route_id], 'directions': directions, 'direction': selected_direction,
             'direction_labels': labels, 'direction_adjusted': direction_adjusted, 'rail': rail,
             'measurement_name': measurement_name, 'terminus_mode': selected_stop == '@termini',
+            'origin_mode': selected_stop == '@origins', 'variations': variations, 'variation_id': variation_id,
             'stops': stops, 'stop_id': selected_stop, 'trips': records, 'departures': departures, 'headways': _summary(gaps),
             'hourly': hourly_rows,
             'issues': issues, 'block_count': len({row.get('block_id') for row in records if row.get('block_id')}),

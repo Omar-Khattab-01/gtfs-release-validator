@@ -81,7 +81,7 @@ class FinalChecksTests(unittest.TestCase):
                     archive.writestr(info, content)
             report = validate_feed(path)
             self.assertFalse(any(item.rule_id == 'PKG009' for item in report.findings))
-            self.assertTrue(any(item.rule_id == 'PKG018' for item in report.findings))
+            self.assertFalse(any(item.rule_id in {'PKG009','PKG018'} for item in report.findings))
             write_feed(path, mode=0o666)
             self.assertFalse(any(item.rule_id in {'PKG009','PKG016'} for item in validate_feed(path).findings))
             write_feed(path, mode=0o600)

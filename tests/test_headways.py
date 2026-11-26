@@ -105,7 +105,7 @@ class HeadwayTests(unittest.TestCase):
 
     def test_rail_defaults_to_origins_and_keeps_short_turns_visible(self):
         self.rail_trips()
-        result = route_headways(self.rail_index(), date(2026,10,13), 'r19', 'all')
+        result = route_headways(self.rail_index(), date(2026,10,13), 'r19', 'all', '@termini')
         self.assertTrue(result['terminus_mode'])
         self.assertEqual(4, len(result['departures']))
         self.assertEqual(5, len(result['trips']))
@@ -142,6 +142,24 @@ class HeadwayTests(unittest.TestCase):
         self.assertEqual(600, result['headways']['minimum'])
         self.assertEqual(2, result['headways']['count'])
         self.assertEqual({'Blair','Trim'}, {item['station_name'] for item in result['hourly']})
+
+    def test_partial_variations_have_origin_departures_and_can_be_filtered(self):
+        self.rail_trips()
+        self.trip('short2','0',[('middle','05:17:00',0),('be','05:19:00',1)], 'short2')
+        index = self.rail_index()
+        result = route_headways(index, date(2026,10,13), 'r19', 'all')
+        self.assertTrue(result['origin_mode'])
+        self.assertEqual(6, len(result['departures']))
+        self.assertEqual(0, result['not_at_stop'])
+        short = next(item for item in result['variations'] if item['origin'] == 'RIDEAU O-TRAIN')
+        self.assertEqual(2, short['trip_count'])
+        filtered = route_headways(index, date(2026,10,13), 'r19', 'all', variation_id=short['variation_id'])
+        self.assertEqual({'short','short2'}, {item['trip_id'] for item in filtered['trips']})
+        self.assertEqual(600, filtered['headways']['median'])
+        self.assertEqual({'middle'}, {item['origin_departure']['stop_id'] for item in filtered['trips']})
+        self.assertEqual({short['variation_id']}, {item['variation_id'] for item in filtered['trips']})
+        with self.assertRaises(ValueError):
+            route_headways(index, date(2026,10,13), 'r19', variation_id='nonexistent')
 
     def test_lines_two_and_four_measure_their_own_termini(self):
         for line, start, end in [('2','bay','lime'), ('4','south','airport')]:

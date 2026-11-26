@@ -7,6 +7,7 @@ import json
 import mimetypes
 import sqlite3
 import threading
+import time
 import uuid
 import webbrowser
 import zipfile
@@ -36,6 +37,8 @@ from .source_final import compare_source_final
 from .hastus_diagnostics import export_trips
 from .schedule import calendar_day, calendar_month, calendar_trips, service_bounds
 from .headways import route_headways
+from .file_picker import pick_file
+from .packaging import packaging_report
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -52,6 +55,9 @@ class Job:
     rail_path: str = ""
     status: str = "queued"
     progress: str = "Waiting to start"
+    progress_percent: int = 0
+    started_at: float | None = None
+    elapsed_seconds: float = 0
     save_indexes: bool = False
     force_revalidate: bool = False
     audit_cache_status: str = "Session only"
@@ -71,7 +77,7 @@ class Job:
     viewer_cache: dict[tuple, dict[str, Any]] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def public(self) -> dict[str, Any]:
+    def public(self, include_report=True) -> dict[str, Any]:
         with self.lock:
             payload: dict[str, Any] = {
                 "id": self.id,
@@ -81,12 +87,14 @@ class Job:
                 "rail_path": self.rail_path,
                 "status": self.status,
                 "progress": self.progress,
+                "progress_percent": self.progress_percent,
+                "elapsed_seconds": round(time.monotonic()-self.started_at, 1) if self.started_at and self.status == "running" else self.elapsed_seconds,
                 "error": self.error,
-                "final_validation": self.final_validation,
+                "final_validation": self.final_validation if include_report and self.status == "complete" else None,
                 "index_status": self.index_status,
                 "audit_cache_status": self.audit_cache_status,
             }
-            if self.report is not None:
+            if self.report is not None and include_report and self.status == "complete":
                 payload["report"] = self.report
             return payload
 
@@ -98,6 +106,8 @@ JOBS_LOCK = threading.Lock()
 def _run_job(job: Job) -> None:
     with job.lock:
         job.status = "running"
+        job.started_at = time.monotonic()
+        job.progress_percent = 2
         job.progress = "Validating ZIPs and comparing exports"
     try:
         feeds = (("CleverCAD", job.clevercad_path), ("HASTUS", job.hastus_path),
@@ -119,6 +129,8 @@ def _run_job(job: Job) -> None:
                         job.final_validation = saved.get('final_validation')
                         job.audit_cache_status = 'Reused saved audit: unchanged inputs/settings, same validation day.'
                         job.status, job.progress = 'complete', 'Ready — reopened saved audit'
+                        job.progress_percent = 100
+                        job.elapsed_seconds = round(time.monotonic()-job.started_at, 1)
                     return
                 job.audit_cache_status = 'Running fresh checks (no matching saved audit, or fresh checks requested).'
             except (OSError, ValueError) as exc:
@@ -126,11 +138,13 @@ def _run_job(job: Job) -> None:
         if job.force_revalidate:
             clear_indexes()
         index_errors = []
-        for label, path in feeds:
+        supplied = [(label, path) for label, path in feeds if path]
+        for position, (label, path) in enumerate(supplied):
             if not path:
                 continue
             with job.lock:
-                job.progress = f"Checking saved index / preparing browsing: {label}"
+                job.progress = f"Preparing {label}"
+                job.progress_percent = 5 + int(25*position/len(supplied))
             try:
                 index = get_index(path, persist=job.save_indexes)
                 job.index_status.append({"source": label, "status": index.cache_status, "warning": index.cache_warning})
@@ -138,9 +152,13 @@ def _run_job(job: Job) -> None:
                 # A malformed feed must still display its validation findings.
                 index_errors.append(f"{label}: {exc}")
         with job.lock:
-            job.progress = "Validating ZIPs and comparing exports"
+            job.progress = "Comparing exports"
+            job.progress_percent = 30
+        def comparison_progress(message, percent):
+            with job.lock:
+                job.progress, job.progress_percent = message, 30 + int(percent * .35)
         if job.clevercad_path and job.hastus_path:
-            report = validate_merge(job.clevercad_path,job.hastus_path,job.final_path,rail_path=job.rail_path) if job.rail_path else validate_merge(job.clevercad_path,job.hastus_path,job.final_path)
+            report = validate_merge(job.clevercad_path, job.hastus_path, job.final_path, rail_path=job.rail_path or None, progress=comparison_progress)
         else:
             report = validate_feed(job.final_path) if job.final_path else ValidationReport(source_path=job.hastus_path or job.clevercad_path or job.rail_path,profile='source-preflight')
             if job.final_path:
@@ -155,8 +173,13 @@ def _run_job(job: Job) -> None:
             report.stats.setdefault('inputs',{})['Final merged GTFS']={"path":job.final_path,"sha256":report.sha256}
         if index_errors:
             report.stats["browse_index_errors"] = index_errors
+        inspection_steps = 0
         def inspection_progress(message):
-            with job.lock:job.progress=message
+            nonlocal inspection_steps
+            inspection_steps += 1
+            with job.lock:
+                job.progress = message
+                job.progress_percent = min(84, 65 + inspection_steps*3)
         final_snapshot={'files':dict(report.files),'sha256':report.sha256,'archive_size':report.archive_size,
                         'findings':report.stats.get('final_technical_findings',[])} if job.final_path else None
         add_inspections(report,{'cad':job.clevercad_path,'hastus':job.hastus_path,'rail':job.rail_path,'final':job.final_path},final_snapshot,inspection_progress)
@@ -180,11 +203,12 @@ def _run_job(job: Job) -> None:
             final = {"technical": {"status": "complete", "counts": {level: sum(item["severity"] == level for item in technical) for level in ("blocker", "error", "warning", "info")},
                                   "findings": technical},
                      "agency": {"status": "not_requested"}, "mobility": {"status": "not_requested"}}
-            for engine, enabled in (("agency", job.run_agency), ("mobility", job.run_mobility)):
+            for engine, enabled in (("mobility", job.run_mobility), ("agency", job.run_agency)):
                 if not enabled:
                     continue
                 with job.lock:
-                    job.progress = f"Checking final GTFS: {engine} validation"
+                    job.progress = "MobilityData validation" if engine == "mobility" else "OC Transpo validation"
+                    job.progress_percent = 86 if engine == "mobility" else 92
                 try:
                     if engine == "agency":
                         result = agency_checks(job.final_path, job.validation_date, job.release_policy, job.sort_reference)
@@ -204,6 +228,8 @@ def _run_job(job: Job) -> None:
         report.finish()
         with job.lock:
             job.report = report.to_dict()
+        with job.lock:
+            job.progress, job.progress_percent = "Saving results", 97
         if cache_identity and not index_errors:
             try:
                 job.audit_cache_status = audit_cache.save(cache_identity,job)
@@ -212,10 +238,13 @@ def _run_job(job: Job) -> None:
         with job.lock:
             job.status = "complete"
             job.progress = "Ready"
+            job.progress_percent = 100
+            job.elapsed_seconds = round(time.monotonic()-job.started_at, 1)
     except Exception as exc:  # Last-resort isolation for the web worker.
         with job.lock:
             job.error = f"{type(exc).__name__}: {exc}"
             job.status = "failed"
+            job.elapsed_seconds = round(time.monotonic()-job.started_at, 1)
 
 
 def _find_job(job_id: str) -> Job | None:
@@ -233,11 +262,11 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Frame-Options", "SAMEORIGIN" if self.path.startswith("/file-viewer/") else "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'",
+            ("frame-ancestors 'self'; " if self.path.startswith("/file-viewer/") else "frame-ancestors 'none'; ") + "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:",
         )
 
     def _bytes(self, status: int, content: bytes, content_type: str) -> None:
@@ -281,7 +310,26 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             if job is None:
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "Unknown run"})
             if len(parts) == 3:
-                return self._json(HTTPStatus.OK, job.public())
+                return self._json(HTTPStatus.OK, job.public(include_report=parse_qs(parsed_url.query).get("summary") != ["1"]))
+            if len(parts) == 4 and parts[3] == 'packaging':
+                query = parse_qs(parsed_url.query)
+                source = query.get('source', ['final'])[0]
+                feed_path = {'cad': job.clevercad_path, 'hastus': job.hastus_path,
+                             'rail': job.rail_path, 'final': job.final_path}.get(source)
+                if not feed_path:
+                    return self._json(HTTPStatus.BAD_REQUEST, {'error': 'This export was not supplied'})
+                extract = query.get('extract', [''])[0] == '1'
+                key = ('packaging', source, extract)
+                try:
+                    with job.lock:
+                        result = None if extract else job.viewer_cache.get(key)
+                    if result is None:
+                        result = packaging_report(feed_path, extract)
+                        with job.lock:
+                            job.viewer_cache[key] = result
+                    return self._json(HTTPStatus.OK, result)
+                except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as exc:
+                    return self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {'error': str(exc)})
             if len(parts) == 4 and parts[3] == 'headways':
                 query = parse_qs(parsed_url.query, keep_blank_values=True)
                 source = query.get('source', ['final'])[0]
@@ -303,11 +351,12 @@ class ValidatorHandler(BaseHTTPRequestHandler):
                     stop = query.get('stop_id', [''])[0]
                     threshold = query.get('threshold', [''])[0]
                     threshold = float(threshold) if threshold else None
-                    key = ('headways', source, day.isoformat(), route, direction, stop, threshold)
+                    variation_id = query.get('variation_id', [''])[0]
+                    key = ('headways', source, day.isoformat(), route, direction, stop, threshold, variation_id)
                     with job.lock:
                         data = job.viewer_cache.get(key)
                     if data is None:
-                        data = route_headways(get_index(feed_path), day, route, direction, stop, threshold)
+                        data = route_headways(get_index(feed_path), day, route, direction, stop, threshold, variation_id)
                         with job.lock:
                             old_keys = [item for item in job.viewer_cache if item[0] == 'headways']
                             for old_key in old_keys[:-3]:
@@ -517,7 +566,7 @@ class ValidatorHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request_path = urlparse(self.path).path
-        if request_path not in {"/api/runs", "/api/cache/clear", '/api/cache/offload'}:
+        if request_path not in {"/api/runs", "/api/cache/clear", '/api/cache/offload', '/api/pick-file'}:
             return self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
         if self.headers.get("X-GTFS-Validator") != "1":
             return self._json(HTTPStatus.FORBIDDEN, {"error": "Missing local request header"})
@@ -533,6 +582,11 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid JSON"})
         if not isinstance(payload, dict):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": "Expected a JSON object"})
+        if request_path == '/api/pick-file':
+            try:
+                return self._json(HTTPStatus.OK, pick_file(str(payload.get('kind') or 'zip')))
+            except (OSError, ValueError) as exc:
+                return self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {'error': str(exc)})
         if request_path == "/api/cache/clear":
             return self._json(HTTPStatus.OK, cache_info(remove_unused=True))
         if request_path == '/api/cache/offload':

@@ -28,7 +28,7 @@ def offline_mobility_report(result: dict) -> bytes:
 <title>Local MobilityData validation report</title>
 <style>body{{font:16px system-ui;max-width:1000px;margin:40px auto;padding:20px}}details{{border:1px solid #bbb;padding:16px;margin:12px 0}}summary{{cursor:pointer}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}</style>
 <h1>MobilityData validation · local report</h1>
-<p>Results produced by the canonical validator; offline presentation by GTFS Merge Auditor. Samples are not an exhaustive list of affected rows.</p>
+<p>MobilityData validation report · GTFS Validator. Sample records are shown below.</p>
 <p>Status: {escape(result.get('status'))} · Validation date: {escape(result.get('validation_date'))}</p>
 <pre>{escape(json.dumps(result.get('counts',{}),indent=2))}</pre>
 {''.join(groups)}<details><summary>Engine metadata</summary><pre>{escape(json.dumps(result.get('metadata',{}),ensure_ascii=False,indent=2))}</pre></details></html>"""

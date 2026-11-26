@@ -2,6 +2,7 @@ const headwaySource = document.querySelector('#headway-source');
 const headwayRoute = document.querySelector('#headway-route');
 const headwayDate = document.querySelector('#headway-date');
 const headwayDirection = document.querySelector('#headway-direction');
+const headwayVariation = document.querySelector('#headway-variation');
 const headwayStop = document.querySelector('#headway-stop');
 const headwayThreshold = document.querySelector('#headway-threshold');
 const headwayStatus = document.querySelector('#headway-status');
@@ -12,7 +13,7 @@ let headwayLimit = 60;
 let headwayOpening = false;
 
 function headwayBusy(busy) {
-  for (const field of [headwayRoute, headwayDate, headwayDirection, headwayStop, headwayThreshold]) field.disabled = busy;
+  for (const field of [headwayRoute, headwayDate, headwayDirection, headwayVariation, headwayStop, headwayThreshold]) field.disabled = busy;
 }
 
 function headwayDuration(seconds) {
@@ -70,7 +71,7 @@ async function loadHeadwayCatalog(route = '', day = '') {
       headwayStatus.textContent = 'This export has no routes to inspect.';
       return;
     }
-    await loadHeadways(true, true);
+    await loadHeadways(true, true, true);
   } catch (error) {
     if (request === headwayRequest) headwayStatus.textContent = error.message;
   } finally {
@@ -78,13 +79,14 @@ async function loadHeadwayCatalog(route = '', day = '') {
   }
 }
 
-async function loadHeadways(resetStop = false, resetDirection = false) {
+async function loadHeadways(resetStop = false, resetDirection = false, resetVariation = false) {
   const request = ++headwayRequest;
   if (!headwayRoute.value || !headwayDate.value || !headwayDate.checkValidity() || !headwayThreshold.checkValidity()) return;
   headwayBusy(true);
   headwayData = null;
   const params = {date:headwayDate.value, route_id:headwayRoute.value, threshold:headwayThreshold.value};
   if (!resetDirection && headwayDirection.options.length) params.direction = headwayDirection.value;
+  if (!resetVariation && headwayVariation.value) params.variation_id = headwayVariation.value;
   if (!resetStop && headwayStop.value) params.stop_id = headwayStop.value;
   headwayStatus.textContent = 'Loading trip schedules, departure gaps and blocks…';
   headwayContent.replaceChildren();
@@ -95,7 +97,9 @@ async function loadHeadways(resetStop = false, resetDirection = false) {
     headwayLimit = 60;
     headwayDirection.innerHTML = data.directions.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(headwayDirectionLabel(value, data))}</option>`).join('') + '<option value="all">All directions</option>';
     headwayDirection.value = data.direction;
-    headwayStop.innerHTML = data.stops.map(stop => `<option value="${escapeHtml(stop.stop_id)}">${escapeHtml(stop.stop_name)}${!data.rail ? ` · ${escapeHtml(stop.stop_id)}` : ''}${stop.stop_id === '@termini' ? '' : ` · ${stop.trip_count} trips`}</option>`).join('');
+    headwayVariation.innerHTML = '<option value="">All variations</option>' + (data.variations || []).map(item => `<option value="${item.variation_id}">${escapeHtml(item.variation_id)} · ${escapeHtml(item.origin)} → ${escapeHtml(item.destination)} · ${item.stop_count} stops · ${item.trip_count} trips · ${escapeHtml(item.shape_id || 'No shape')}</option>`).join('');
+    headwayVariation.value = data.variation_id || '';
+    headwayStop.innerHTML = data.stops.map(stop => `<option value="${escapeHtml(stop.stop_id)}">${escapeHtml(stop.stop_name)}${!data.rail ? ` · ${escapeHtml(stop.stop_id)}` : ''}${['@termini','@origins'].includes(stop.stop_id) ? '' : ` · ${stop.trip_count} trips`}</option>`).join('');
     headwayStop.value = data.stop_id;
     headwayStatus.textContent = `${data.route.route_short_name || data.route.route_id} · ${data.date} · ${data.trips.length} trip records · ${data.departures.length} boarding departures · ${data.measurement_name || 'Selected stop'}${data.direction_adjusted ? ' · Direction switched to boarding departures from this station.' : ''}`;
     renderHeadways();
@@ -113,8 +117,9 @@ function renderHeadwayTrips() {
   document.querySelector('#headway-trip-rows').innerHTML = rows.slice(0,headwayLimit).map(trip => {
     const departures = trip.departures.map(call => `<div>${escapeHtml(call.time)} <small>${escapeHtml(call.station_name || '')} · ${escapeHtml(call.stop_id || '')} · Seq ${escapeHtml(call.sequence)}</small></div>`).join('');
     const gaps = trip.departures.map(call => `<div>${headwayDuration(call.headway_seconds)}${call.previous_trip_id ? `<small>After ${escapeHtml(call.previous_trip_id)}</small>` : ''}</div>`).join('');
-    return `<tr><td>${departures || 'No boarding departure'}</td>
-      <td>${gaps || '—'}</td><td><button type="button" class="text-button headway-trip-link" data-trip="${escapeHtml(trip.trip_id)}">${escapeHtml(trip.trip_id)}</button><div>${escapeHtml(trip.trip_headsign || '')}</div></td>
+    const origin = trip.origin_departure ? `${escapeHtml(trip.origin_departure.time)}<small>From ${escapeHtml(trip.origin_departure.stop_name)} · ${escapeHtml(trip.origin_departure.stop_id)}<br>Outside selected measurement</small>` : 'No timed boarding departure';
+    return `<tr><td>${departures || origin}</td>
+      <td>${gaps || '—'}</td><td><button type="button" class="text-button headway-trip-link" data-trip="${escapeHtml(trip.trip_id)}">${escapeHtml(trip.trip_id)}</button><div>${escapeHtml(trip.trip_headsign || '')}</div><small>${escapeHtml(trip.variation_id || '')}</small></td>
       <td><strong>${escapeHtml(trip.block_id || 'Unassigned')}</strong><div>${escapeHtml(headwayDirectionLabel(trip.direction_id || ''))}</div></td>
       <td>${escapeHtml(trip.service_id)}<small>Shape ${escapeHtml(trip.shape_id || 'Unspecified')}</small></td>
       <td>${escapeHtml(trip.first_time || '—')} – ${escapeHtml(trip.last_time || '—')}<small>${escapeHtml(trip.first_stop)} → ${escapeHtml(trip.last_stop)}</small></td></tr>`;
@@ -128,10 +133,10 @@ function renderHeadways() {
   const issueGroups = {};
   for (const issue of data.issues) (issueGroups[issue.kind] ||= []).push(issue);
   const issues = Object.values(issueGroups).map(group => `<details class="headway-review"><summary>${escapeHtml(group[0].message)} <strong>${group.length}</strong></summary>${group.map(issue => `<pre>${escapeHtml(JSON.stringify(issue,null,2))}</pre>`).join('')}</details>`).join('');
-  headwayContent.innerHTML = `${data.rail ? `<p class="field-help">${data.terminus_mode ? 'Measured from the first stop of trips departing a configured terminus. Short trips starting elsewhere stay visible below and do not contribute to these headways.' : 'Station platforms are grouped; only boarding departures contribute to headways.'} Gaps are calculated separately for each station and direction.</p>` : ''}${data.measurement_notice ? `<p role="status">${escapeHtml(data.measurement_notice)}</p>` : ''}<div class="metric-grid">${card(headwayDuration(data.headways.minimum),'Shortest headway')}${card(headwayDuration(data.headways.median),'Median headway')}${card(headwayDuration(data.headways.maximum),'Longest headway')}${card(data.block_count,'Assigned blocks')}</div>
+  headwayContent.innerHTML = `${data.rail || data.origin_mode ? `<p class="field-help">${data.origin_mode ? 'Measured from each variation’s first timed boarding departure, including trips starting partway along the line.' : data.terminus_mode ? 'Measured from the first stop of trips departing a configured terminus. Short trips starting elsewhere stay visible below and do not contribute to these headways.' : 'Station platforms are grouped; only boarding departures contribute to headways.'} Gaps are calculated separately for each station and direction.</p>` : ''}${data.measurement_notice ? `<p role="status">${escapeHtml(data.measurement_notice)}</p>` : ''}<div class="metric-grid">${card(headwayDuration(data.headways.minimum),'Shortest headway')}${card(headwayDuration(data.headways.median),'Median headway')}${card(headwayDuration(data.headways.maximum),'Longest headway')}${card(data.block_count,'Assigned blocks')}</div>
     <p class="field-help">${data.unassigned_blocks} trip records have an empty block ID. ${data.not_at_stop} scheduled records have no timed boarding departure at this stop. ${data.excluded_no_pickup_calls} drop-off-only calls and ${data.missing_departure_times} calls without departure times are excluded from the gaps.</p>
     <details class="headway-section" ${data.issues.length ? 'open' : ''}><summary>Review checks · ${data.issues.length} items</summary><p>Block overlaps are checked across this route’s active directions. Gap alerts use your selected threshold.</p>${issues || '<p>No review items found by these checks.</p>'}</details>
-    <details class="headway-section" open><summary>Hourly departure frequency and headways</summary><div class="table-wrap"><table class="headway-hourly"><thead><tr><th>GTFS hour</th><th>Direction / station</th><th>Departures in hour</th><th>Shortest gap</th><th>Median gap</th><th>Longest gap</th></tr></thead><tbody>${data.hourly.map(hour => `<tr><td>${String(hour.hour).padStart(2,'0')}:00</td><td>${escapeHtml(headwayDirectionLabel(hour.direction_id || ''))}<small>${escapeHtml(hour.station_name || '')}</small></td><td>${hour.departures}</td><td>${headwayDuration(hour.minimum)}</td><td>${headwayDuration(hour.median)}</td><td>${headwayDuration(hour.maximum)}</td></tr>`).join('')}</tbody></table></div></details>
+    <details class="headway-section"><summary>Hourly departure frequency and headways</summary><div class="table-wrap"><table class="headway-hourly"><thead><tr><th>GTFS hour</th><th>Direction / station</th><th>Departures in hour</th><th>Shortest gap</th><th>Median gap</th><th>Longest gap</th></tr></thead><tbody>${data.hourly.map(hour => `<tr><td>${String(hour.hour).padStart(2,'0')}:00</td><td>${escapeHtml(headwayDirectionLabel(hour.direction_id || ''))}<small>${escapeHtml(hour.station_name || '')}</small></td><td>${hour.departures}</td><td>${headwayDuration(hour.minimum)}</td><td>${headwayDuration(hour.median)}</td><td>${headwayDuration(hour.maximum)}</td></tr>`).join('')}</tbody></table></div></details>
     <h4>Trips and blocks</h4><p class="field-help">Open a trip ID for its full exported attributes, stops and shape. Service times such as 25:00 retain their GTFS hour.</p>
     <div class="headway-table-tools"><label>Find a trip, block, destination or shape<input id="headway-trip-search" type="search"></label><span id="headway-trip-count"></span></div>
     <div class="table-wrap"><table class="headway-trip-table"><thead><tr><th>Departure at selected stop</th><th>Gap from previous departure</th><th>Trip / destination</th><th>Block / direction</th><th>Service / shape</th><th>Trip times / endpoints</th></tr></thead><tbody id="headway-trip-rows"></tbody></table></div><button type="button" class="button secondary" id="headway-more">Show more trips</button>`;
@@ -151,9 +156,10 @@ async function openHeadways(source, day, route) {
 
 document.querySelector('[data-view="headways"]').addEventListener('click', () => { if (!headwayData && !headwayOpening) loadHeadwayCatalog(); });
 headwaySource.addEventListener('change', () => loadHeadwayCatalog());
-headwayRoute.addEventListener('change', () => loadHeadways(true, true));
-headwayDate.addEventListener('change', () => loadHeadways(true, true));
-headwayDirection.addEventListener('change', () => loadHeadways(true));
+headwayRoute.addEventListener('change', () => loadHeadways(true, true, true));
+headwayDate.addEventListener('change', () => loadHeadways(true, true, true));
+headwayDirection.addEventListener('change', () => loadHeadways(true, false, true));
+headwayVariation.addEventListener('change', () => loadHeadways(true));
 headwayStop.addEventListener('change', () => loadHeadways());
 headwayThreshold.addEventListener('change', () => loadHeadways());
 headwayContent.addEventListener('click', event => {

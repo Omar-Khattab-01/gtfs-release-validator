@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import shutil
 import stat
-import subprocess
-import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -143,29 +140,25 @@ def inspect_archive(path: Path, report: ValidationReport) -> zipfile.ZipFile | N
             )
         if not info.is_dir() and info.create_system != 3 and stored_mode == 0:
             unspecified_permissions.append(name)
-        elif not info.is_dir() and permissions & 0o444 != 0o444:
+        elif not info.is_dir() and permissions == 0o600:
             report.add(
                 "PKG009",
                 "blocker",
                 "Packaging",
-                "Unsafe stored file permissions",
-                f"Stored permissions are {permissions:03o}; downstream extraction may make the file unreadable.",
+                "Stored file mode is 0600",
+                "This ZIP member stores mode 0600. Review it before publication.",
                 file=name,
                 observed=f"{permissions:03o}",
-                expected="readable by owner, group and others (0644 recommended)",
+                expected="stored mode other than 0600",
             )
 
         report.files[name] = {
             "compressed_bytes": info.compress_size,
             "uncompressed_bytes": info.file_size,
             "crc32": f"{info.CRC:08x}",
-            "stored_mode": f"{permissions:03o}",
+            "stored_mode": None if name in unspecified_permissions else f"{permissions:03o}",
         }
 
-    if unspecified_permissions:
-        report.add("PKG018", "info", "Packaging", "Unix permissions not specified",
-                   f"{len(unspecified_permissions)} Windows/DOS members have no Unix permission metadata. This does not mean they are locked.",
-                   context={"files": unspecified_permissions})
     if total_uncompressed > MAX_TOTAL_BYTES:
         report.add(
             "PKG010",
@@ -224,41 +217,6 @@ def inspect_archive(path: Path, report: ValidationReport) -> zipfile.ZipFile | N
             file=expected,
         )
 
-    if not any(is_unsafe_name(name) for name in names) and shutil.which("unzip"):
-        with tempfile.TemporaryDirectory(prefix="gtfs-validator-extract-") as temp_dir:
-            completed = subprocess.run(
-                ["unzip", "-qq", str(path), "-d", temp_dir],
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-            )
-            if completed.returncode != 0:
-                report.add(
-                    "PKG015",
-                    "blocker",
-                    "Packaging",
-                    "Archive extraction failed",
-                    completed.stderr.strip() or "The system unzip utility could not extract the archive.",
-                )
-            else:
-                extracted_modes: dict[str, str] = {}
-                for name in names:
-                    extracted = Path(temp_dir) / name
-                    if not extracted.is_file():
-                        continue
-                    mode = stat.S_IMODE(extracted.stat().st_mode)
-                    extracted_modes[name] = f"{mode:03o}"
-                    if mode & 0o444 != 0o444:
-                        report.add(
-                            "PKG016",
-                            "blocker",
-                            "Packaging",
-                            "Unsafe extracted file permissions",
-                            f"The system unzip utility extracted this member with mode {mode:03o}.",
-                            file=name,
-                            observed=f"{mode:03o}",
-                            expected="644",
-                        )
-                report.stats["extracted_permissions"] = extracted_modes
+    # Extraction is available in Packaging on demand, rather than decompressing
+    # every feed again during each technical validation.
     return archive

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+from .version import __version__
 
 
 SEVERITY_ORDER = {"blocker": 0, "error": 1, "warning": 2, "info": 3}
@@ -29,7 +30,7 @@ class Finding:
 @dataclass
 class ValidationReport:
     source_path: str
-    tool_version: str = "0.13.0"
+    tool_version: str = __version__
     profile: str = "oc-transpo"
     started_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

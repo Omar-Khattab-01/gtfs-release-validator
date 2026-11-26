@@ -1,4 +1,4 @@
-# GTFS Release Validator
+# GTFS Validator
 
 I built this tool to make GTFS exports easier to inspect before and after a feed is merged for publication. Transit data can be structurally valid and still lose a stop, change a trip pattern, or carry inconsistent information between scheduling systems. I wanted a way to trace those differences back to the source records.
 
@@ -18,17 +18,21 @@ The application brings together individual feed inspection, CleverCAD and HASTUS
 
 ## Main areas
 
-- **Individual feeds:** Review each export's contents, technical findings, route health, and source diagnostics.
+- **Feeds:** Review each export’s files, routes, findings and source diagnostics. Filter by level and issue type; paged lists and evidence panels keep your place.
 - **Schedule calendar** shows Bus, Line 1, and Lines 2 & 4 by service date. Filter a route to verify its trips, calendar exceptions, and exported colors.
-- **Headways & blocks** calculates hourly departure counts and gaps from `stop_times.txt` for a selected date, direction and boarding stop. Lines 1, 2 and 4 default to terminus departures, with station platforms grouped and origin/destination names beside directions. Line 1 supports Tunney’s Pasture, Blair and future Trim when served; Line 2 uses Bayview and Limebank; Line 4 uses South Keys and Airport. Short trips remain visible, while gaps are kept separate for each originating terminus and direction. Review trip attributes, block IDs, overlapping block times, simultaneous departures and optional gap thresholds.
-- **Saved exports** reopens indexed paths and matching audits. Use **Manage saved exports** to offload an individual feed's index and related audits or all saved cache data.
+- **Headways & blocks** calculates departure gaps from `stop_times.txt`. Filter by route, date, direction and variation. Rail defaults to each variation’s actual departure station, including short trips. A terminus-only view remains available for Lines 1, 2 and 4, with Trim activated when served. Station platforms are grouped, and gaps remain separate for each station and direction. Trip rows show their actual origin, variation, shape and block.
+- **Settings** holds validation options, Java/JAR and reference paths, and saved indexes. Export inputs start blank; paste a path or use **Browse**. Use **Manage saved exports** to offload an individual feed's index and related audits or all saved cache data.
 - **Source comparison:** Investigate bus variations and stop mappings with both source records available for context.
 - **Rail review:** Follow rail routes, trips, service calendars, and differences against the final feed.
-- **Final validation:** Keep technical findings, agency expectations, and canonical validator results distinct. Calendar checks summarize start timing relative to the selected validation date, inclusive coverage length, and scheduled service days after calendar exceptions. Future and expired exports are flagged; no Friday start or fixed one-month duration is imposed.
+- **Validation:** Review MobilityData first, then OC Transpo and GTFS checks. Each engine has file/level filters and paged findings. Calendar checks summarize start timing relative to the selected validation date, inclusive coverage length, and scheduled service days after calendar exceptions. Future and expired exports are flagged; no Friday start or fixed one-month duration is imposed.
+
+- **Packaging:** Review stored ZIP modes separately from extracted modes. Missing Unix metadata and modes such as `0644` or `0666` are accepted; stored `0600` is flagged. **Test extraction** checks a temporary copy without modifying the source. On Windows, Unix permissions are read from ZIP metadata; extracted files use Windows attributes.
+- **Evidence:** Files, trips, route variations and the advanced viewer open in panels. Back restores the previous evidence view; Close returns to the same list and filters.
+- **Progress:** A green stage bar and elapsed timer track validation. Status polling omits the large report until completion. Comparison parsing avoids per-row dictionaries and reuses identical stop-pattern fingerprints.
 
 The application also includes my [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) for reading feed files with coloured columns and issue highlights.
 
-On Windows, extract an update into a fresh folder and run `start_windows.bat` there. The launcher prints the version and application folder. If the usual port is occupied, it opens this copy on a free local port; use the newly opened browser tab. The version is also shown at the top of the page. You can carry over `.local-tools` to retain the MobilityData JAR; saved Java settings remain in your user settings and do not select the app version.
+On Windows, extract an update into a fresh folder and run `start_windows.bat` there. The launcher prints the version and application folder. If the usual port is occupied, it opens this copy on a free local port; use the newly opened browser tab. The version is shown in the footer. You can carry over `.local-tools` to retain the MobilityData JAR; saved Java settings remain in your user settings and do not select the app version.
 
 ## Review limits
 

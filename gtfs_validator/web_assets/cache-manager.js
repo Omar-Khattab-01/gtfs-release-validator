@@ -6,19 +6,8 @@ const pathStorageKey = 'gtfs.validator.paths.v1';
 let cacheManagerData = null;
 let cacheOffloading = false;
 
-try {
-  const saved = JSON.parse(localStorage.getItem(pathStorageKey) || '{}');
-  for (const id of savedPathFields) if (typeof saved[id] === 'string') document.getElementById(id).value = saved[id];
-} catch (_) { /* Remembered paths are optional on restricted browsers. */ }
-
-function rememberExportPaths() {
-  try {
-    const data = Object.fromEntries(savedPathFields.map(id => [id,document.getElementById(id).value]));
-    localStorage.setItem(pathStorageKey, JSON.stringify(data));
-  } catch (_) { /* Manual entry remains available. */ }
-}
-for (const id of savedPathFields) document.getElementById(id).addEventListener('input', rememberExportPaths);
-form.addEventListener('submit', rememberExportPaths);
+for (const id of savedPathFields) document.getElementById(id).value = '';
+try { localStorage.removeItem(pathStorageKey); } catch (_) {}
 
 function cacheSize(bytes) {
   if (bytes >= 1024**3) return `${(bytes/1024**3).toFixed(2)} GB`;
@@ -79,7 +68,6 @@ cacheFeedList.addEventListener('click', event => {
   const entry = cacheManagerData.entries.find(item => item.name === use.dataset.cacheUse);
   const role = cacheFeedList.querySelector(`[data-cache-role="${use.dataset.cacheUse}"]`).value;
   document.getElementById(role).value = entry.paths[0];
-  rememberExportPaths();
   cacheDialog.close();
   document.getElementById(role).focus();
 });

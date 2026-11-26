@@ -2,7 +2,7 @@ let inspectionData={};
 let inspectionComparisons={};
 let inspectionSource='hastus';
 let inspectionEvidenceRequest=0;
-let inspectionFindingLimit=100;
+let inspectionFindingLimit=25;
 let inspectionOpener=null;
 let diagnosticFilter='';
 let diagnosticTripLimit=100;
@@ -15,7 +15,7 @@ function renderIndividualFeeds(report) {
   const workflow=report.stats?.workflow || {};
   const paired=workflow.bus_comparison==='complete';
   const both=inspectionData.cad && inspectionData.hastus;
-  document.querySelector('#inspection-workflow').textContent=`${Object.keys(inspectionData).length} exports supplied · Bus comparison: ${paired ? 'available' : both ? 'Unavailable — check source findings' : 'Not available — supply CAD and HASTUS bus'} · Final merged GTFS: ${workflow.final==='supplied' ? 'supplied' : 'Not supplied'}. Individual inspection does not require another export.`;
+  document.querySelector('#inspection-workflow').textContent=`${Object.keys(inspectionData).length} export(s) · ${paired ? 'CAD / HASTUS comparison available' : 'Individual validation'}${workflow.final==='supplied' ? ' · Final GTFS included' : ''}`;
   for (const view of ['routes','stops','missing-cad','missing-hastus']) document.querySelector(`.workspace-tab[data-view="${view}"]`).disabled=!paired;
   document.querySelector('.workspace-tab[data-view="rail"]').disabled=!inspectionData.rail;
   if (!inspectionData[inspectionSource])inspectionSource=['hastus','rail','cad','final'].find(source=>inspectionData[source]) || 'hastus';
@@ -26,27 +26,43 @@ function renderIndividualFeeds(report) {
   if (!paired || active?.disabled)document.querySelector('.workspace-tab[data-view="inspection"]').click();
 }
 
+const inspectionSearchCache = new WeakMap();
 function inspectionSearch(value) {
-  return JSON.stringify(value).toLowerCase().includes(document.querySelector('#inspection-search').value.trim().toLowerCase());
+  const needle=document.querySelector('#inspection-search').value.trim().toLowerCase();
+  if(!needle)return true;
+  if(!value || typeof value!=='object')return String(value).toLowerCase().includes(needle);
+  if(!inspectionSearchCache.has(value))inspectionSearchCache.set(value,JSON.stringify(value).toLowerCase());
+  return inspectionSearchCache.get(value).includes(needle);
 }
 
 function renderInspection() {
   document.querySelector('#inspection-sources').innerHTML=Object.entries(inspectionLabels).map(([source,label])=>{
     const data=inspectionData[source];const counts=data?.validation?.counts || {};
     const issues=(counts.blocker||0)+(counts.error||0)+(counts.warning||0);
-    return `<button type="button" class="route-card ${data ? issues || data.status!=='complete' ? 'issues' : 'healthy' : 'not_comparable'} ${source===inspectionSource ? 'active' : ''}" data-inspection-source="${source}" ${data ? '' : 'disabled'}><strong>${escapeHtml(label)}</strong><span>${!data ? 'Not supplied' : `${data.inventory?.routes || 0} routes · ${data.inventory?.trips || 0} trips · ${issues} findings${data.status!=='complete' ? ' · Inspection incomplete' : ''}`}</span></button>`;
+    return `<button type="button" class="route-card ${data ? issues || data.status!=='complete' ? 'issues' : 'healthy' : 'not_comparable'} ${source===inspectionSource ? 'active' : ''}" data-inspection-source="${source}" ${data ? '' : 'disabled'}><strong>${escapeHtml(label)}</strong><span>${!data ? 'Not supplied' : `${data.inventory?.routes || 0} routes · ${data.inventory?.trips || 0} trips · ${issues} findings${data.status!=='complete' ? ' · Incomplete' : ''}`}</span></button>`;
   }).join('');
   const data=inspectionData[inspectionSource];const target=document.querySelector('#inspection-content');
   if (!data) {target.innerHTML='<p>No export supplied for inspection.</p>';return;}
   const view=document.querySelector('#inspection-section').value;
+  document.querySelector('#inspection-toolbar').classList.toggle('hidden',view==='overview');
   const validation=data.validation || {counts:{},findings:[]};
+  document.querySelectorAll('.inspection-nav button').forEach(button => button.classList.toggle('active', button.dataset.inspectionSection === view));
+  const ruleControl = document.querySelector('#inspection-rule');
+  const ruleValue = ruleControl.value;
+  const rules = new Map();
+  for (const finding of validation.findings || []) if (!finding.rule_id.startsWith('PKG')) {
+    const item = rules.get(finding.rule_id) || {title:finding.title,count:0}; item.count++; rules.set(finding.rule_id,item);
+  }
+  ruleControl.innerHTML = '<option value="">All issue types</option>' + [...rules].map(([rule,item]) => `<option value="${escapeHtml(rule)}">${escapeHtml(item.title)} (${item.count})</option>`).join('');
+  ruleControl.value = rules.has(ruleValue) ? ruleValue : '';
+  document.querySelector('.inspection-filter').classList.toggle('hidden', view !== 'findings');
   const counts=Object.entries(validation.counts || {}).map(([key,value])=>`${value} ${key}`).join(' · ');
-  const heading=`<h4>${escapeHtml(inspectionLabels[inspectionSource])}</h4><p>${escapeHtml(data.path)}</p><p>${escapeHtml(counts)}${data.status!=='complete' ? ' · '+escapeHtml(data.message || data.status) : ''}</p><a href="/api/runs/${currentRunId}/inspection-report.json?source=${inspectionSource}" download>Download this feed’s inspection (JSON)</a>`;
+  const heading=`<details class="export-details"><summary>${escapeHtml(inspectionLabels[inspectionSource])} · ${escapeHtml(counts)}</summary><p>${escapeHtml(data.path)}</p><a href="/api/runs/${currentRunId}/inspection-report.json?source=${inspectionSource}" download>Export JSON</a></details>`;
   if (view==='overview') {
     const inventory=data.inventory || {};
     const categories={};
-    for (const finding of validation.findings || [])categories[finding.category]=(categories[finding.category] || 0)+1;
-    target.innerHTML=heading+`<div class="metric-grid">${Object.entries(inventory).map(([name,value])=>`<div class="metric"><strong>${value}</strong><span>${escapeHtml(name.replaceAll('_',' '))}</span></div>`).join('')}</div><p>Inspection status: ${escapeHtml(data.status)} · ${data.files.filter(file=>file.present!==false).length} archive members</p><p>${Object.entries(categories).map(([name,value])=>`${value} ${escapeHtml(name)}`).join(' · ')}</p><p>Technical findings, agency review items and content-scope checks are listed separately by category. Optional destination and shape fields are review items, not GTFS required-field errors.</p><p>${validation.suppressed_findings ? `${validation.suppressed_findings} additional findings were suppressed by the evidence limit.` : ''}</p><button type="button" data-inspection-section="files">Inspect all files</button> <button type="button" data-inspection-section="routes">Inspect routes and variations</button> <button type="button" data-inspection-section="findings">Review findings</button><p>Use an approved expected-service list or prior export to establish whether entire routes or variations were omitted.</p>`;
+    for (const finding of validation.findings || [])if (!finding.rule_id.startsWith('PKG')) categories[finding.category]=(categories[finding.category] || 0)+1;
+    target.innerHTML=heading+`<div class="metric-grid">${Object.entries(inventory).map(([name,value])=>`<div class="metric"><strong>${value}</strong><span>${escapeHtml(name.replaceAll('_',' '))}</span></div>`).join('')}</div><p>${data.files.filter(file=>file.present!==false).length} archive members</p><p>${Object.entries(categories).map(([name,value])=>`${value} ${escapeHtml(name)}`).join(' · ')}</p><p>${validation.suppressed_findings ? `${validation.suppressed_findings} additional findings were suppressed by the evidence limit.` : ''}</p><button type="button" data-inspection-section="files">Inspect all files</button> <button type="button" data-inspection-section="routes">Inspect routes and variations</button> <button type="button" data-inspection-section="findings">Review findings</button>`;
     if (data.hastus_diagnostics)target.innerHTML+='<button type="button" data-inspection-section="diagnostics">HASTUS export diagnostics</button>';
   } else if (view==='diagnostics') {
     target.innerHTML=heading+renderHastusDiagnostics(data.hastus_diagnostics);
@@ -58,8 +74,9 @@ function renderInspection() {
     target.innerHTML=heading+`<p>${data.unassigned_findings || 0} feed-level findings are not assigned to a route. Route status covers route-specific findings; check File health and Findings too.</p><div class="comparison-table"><table><thead><tr><th>Route</th><th>Type</th><th>Trips / shapes</th><th>Direction</th><th>Route checks</th><th>Inspect</th></tr></thead><tbody>${routes.map(item=>`<tr><td><strong>${escapeHtml(item.route.route_short_name || item.route.route_id)}</strong><br>${escapeHtml(item.route.route_long_name || '')}</td><td>${escapeHtml(item.route.route_type)}</td><td>${item.trip_count} trips · ${item.shape_count} shapes</td><td>${escapeHtml(item.direction_ids.join(', '))}</td><td>${item.status==='needs_review' ? 'Needs review' : 'No route-specific findings'} · ${item.finding_indices.length} findings</td><td><button type="button" data-inspection-route="${escapeHtml(item.route.route_id)}">Variations & trips</button> <button type="button" data-inspection-route-findings="${escapeHtml(item.route.route_id)}">Findings</button></td></tr>`).join('')}</tbody></table></div>`;
   } else if (view==='findings') {
     const level=document.querySelector('#inspection-level').value;
-    const findings=(validation.findings || []).map((finding,index)=>({finding,index})).filter(({finding})=>(!level || finding.severity===level) && inspectionSearch(finding));
-    target.innerHTML=heading+`<p>${findings.length} matching findings${validation.suppressed_findings ? ` · ${validation.suppressed_findings} further findings suppressed` : ''}</p>${findings.slice(0,inspectionFindingLimit).map(({finding,index})=>`<article class="validation-file"><span class="pill ${escapeHtml(finding.severity)}">${escapeHtml(finding.severity)}</span> ${escapeHtml(finding.category)} · ${escapeHtml(finding.rule_id)}<h4>${escapeHtml(finding.title)}</h4><p>${escapeHtml(finding.message)}</p><p>${escapeHtml(finding.file || '')}${finding.row ? ' · CSV record '+finding.row : ''} · ${escapeHtml(finding.key || '')}</p><button type="button" data-inspection-finding="${index}">View evidence</button></article>`).join('') || '<p>No findings match these filters.</p>'}${findings.length>inspectionFindingLimit ? '<button type="button" data-inspection-more>Show more findings</button>' : ''}`;
+    const findings=(validation.findings || []).map((finding,index)=>({finding,index})).filter(({finding})=>!finding.rule_id.startsWith('PKG') && (!level || finding.severity===level) && (!ruleControl.value || finding.rule_id===ruleControl.value) && inspectionSearch(finding));
+    inspectionFindingLimit = Math.max(25, Math.min(inspectionFindingLimit, Math.ceil(findings.length/25)*25));
+    target.innerHTML=heading+`<p>${findings.length} matching findings${validation.suppressed_findings ? ` · ${validation.suppressed_findings} further findings suppressed` : ''}</p><div class="pager"><button type="button" class="button secondary" data-inspection-previous ${inspectionFindingLimit<=25 ? 'disabled' : ''}>Previous</button><span>Page ${inspectionFindingLimit/25} of ${Math.max(1,Math.ceil(findings.length/25))}</span><button type="button" class="button secondary" data-inspection-more ${findings.length<=inspectionFindingLimit ? 'disabled' : ''}>Next</button></div><div class="review-list">${findings.slice(inspectionFindingLimit-25,inspectionFindingLimit).map(({finding,index})=>`<article class="validation-file"><span class="pill ${escapeHtml(finding.severity)}">${escapeHtml(finding.severity)}</span> ${escapeHtml(finding.category)} · ${escapeHtml(finding.rule_id)}<h4>${escapeHtml(finding.title)}</h4><p>${escapeHtml(finding.message)}</p><p>${escapeHtml(finding.file || '')}${finding.row ? ' · CSV record '+finding.row : ''} · ${escapeHtml(finding.key || '')}</p><button type="button" data-inspection-finding="${index}">View evidence</button></article>`).join('') || '<p>No findings match these filters.</p>'}</div>`;
   } else if (view==='comparison') {
     const comparison=inspectionComparisons[inspectionSource];
     if (!inspectionData.final)target.innerHTML=heading+'<p>Final merged GTFS: Not supplied. Individual checks are available now.</p>';
@@ -121,24 +138,8 @@ function openDiagnostic(kind,id,opener=null,more=false) {
   if (!inspectionDialog.open)inspectionDialog.showModal();
 }
 
-async function inspectionOpenViewer(source, {file='',row=0,route='',trip=''}={}) {
-  inspectionDialog.close();
-  document.querySelector('#viewer-source').value=source;
-  await loadViewer();
-  document.querySelector('.workspace-tab[data-view="viewer"]').click();
-  if (trip) {
-    // Direct evidence links do not first open a route / variation, so create
-    // the same selected-trip controls expected by the viewer's race guards.
-    document.querySelector('#viewer-content').innerHTML=`<h4>Trip ${escapeHtml(trip)}</h4><label>Trip<select id="viewer-trip-choice"><option value="${escapeHtml(trip)}">${escapeHtml(trip)}</option></select></label><div id="viewer-trip-detail"></div>`;
-    await openViewerTrip(trip);
-  }
-  else if (route)await openViewerRoute(route);
-  else if (file) {
-    document.querySelector('#viewer-table').value=file;
-    const offset=row>=2 ? Math.floor((row-2)/100)*100 : 0;
-    await openViewerTable(offset);
-    if (row>=2)document.querySelectorAll('#viewer-content tbody tr')[row-2-offset]?.classList.add('evidence-row');
-  }
+async function inspectionOpenViewer(source, options={}) {
+  return openEvidence(source, options);
 }
 
 async function openInspectionFinding(index,opener=null) {
@@ -169,13 +170,14 @@ async function openInspectionFinding(index,opener=null) {
 
 function inspectionAction(event) {
   const button=event.target.closest('button');if (!button)return;
-  if (button.dataset.inspectionSource) {inspectionSource=button.dataset.inspectionSource;inspectionFindingLimit=100;renderInspection();}
+  if (button.dataset.inspectionSource) {inspectionSource=button.dataset.inspectionSource;inspectionFindingLimit=25;renderInspection();}
   else if (button.dataset.inspectionSection) {inspectionDialog.close();document.querySelector('#inspection-section').value=button.dataset.inspectionSection;renderInspection();}
   else if (button.dataset.diagnosticGroup!==undefined)openDiagnostic('group',button.dataset.diagnosticGroup,button);
   else if (button.dataset.diagnosticMessage!==undefined)openDiagnostic('message',button.dataset.diagnosticMessage,button);
   else if (button.dataset.diagnosticMore!==undefined) {diagnosticTripLimit+=100;openDiagnostic('group',button.dataset.diagnosticMore,null,true);}
   else if (button.dataset.inspectionFinding!==undefined)openInspectionFinding(Number(button.dataset.inspectionFinding),button);
-  else if (button.dataset.inspectionMore!==undefined) {inspectionFindingLimit+=100;renderInspection();}
+  else if (button.dataset.inspectionPrevious!==undefined) {inspectionFindingLimit=Math.max(25,inspectionFindingLimit-25);renderInspection();}
+  else if (button.dataset.inspectionMore!==undefined) {inspectionFindingLimit+=25;renderInspection();}
   else if (button.dataset.inspectionFile)inspectionOpenViewer(inspectionSource,{file:button.dataset.inspectionFile,row:Number(button.dataset.row || 0)});
   else if (button.dataset.inspectionRoute)inspectionOpenViewer(inspectionSource,{route:button.dataset.inspectionRoute});
   else if (button.dataset.inspectionFinalRoute)inspectionOpenViewer('final',{route:button.dataset.inspectionFinalRoute});
@@ -185,9 +187,9 @@ function inspectionAction(event) {
   else if (button.dataset.inspectionOpenTab)document.querySelector(`.workspace-tab[data-view="${button.dataset.inspectionOpenTab}"]`).click();
 }
 document.querySelector('#inspection-view').addEventListener('click',inspectionAction);
-document.querySelector('#inspection-view').addEventListener('change',event=>{if (event.target.id==='diagnostic-filter') {diagnosticFilter=event.target.value;inspectionFindingLimit=100;renderInspection();}});
+document.querySelector('#inspection-view').addEventListener('change',event=>{if (event.target.id==='diagnostic-filter') {diagnosticFilter=event.target.value;inspectionFindingLimit=25;renderInspection();}});
 document.querySelector('#inspection-dialog-body').addEventListener('click',inspectionAction);
-for (const control of ['inspection-section','inspection-level'])document.querySelector('#'+control).addEventListener('change',()=>{inspectionFindingLimit=100;renderInspection();});
-document.querySelector('#inspection-search').addEventListener('input',()=>{inspectionFindingLimit=100;renderInspection();});
+for (const control of ['inspection-section','inspection-level','inspection-rule'])document.querySelector('#'+control).addEventListener('change',()=>{inspectionFindingLimit=25;renderInspection();});
+document.querySelector('#inspection-search').addEventListener('input',()=>{inspectionFindingLimit=25;renderInspection();});
 document.querySelector('#inspection-dialog-close').addEventListener('click',()=>inspectionDialog.close());
 inspectionDialog.addEventListener('close',()=>{inspectionEvidenceRequest++;inspectionOpener?.focus({preventScroll:true});});

@@ -49,6 +49,8 @@ let stopMappingData = [];
 let stopMappingLimit = 80;
 let currentRunId = '';
 let pageLimit = 60;
+let findingsPage = 0;
+let findingsFilterKey = '';
 const selected = new Set();
 let viewerInventory = {routes: [], files: []};
 let viewerRequest = 0;
@@ -80,7 +82,7 @@ async function loadViewer() {
     viewerInventory = data;
     document.querySelector('#viewer-table').innerHTML = '<option value="">Select a table</option>' + data.files.filter(file => file.name.endsWith('.txt')).map(file => `<option>${escapeHtml(file.name)}</option>`).join('');
     renderViewerRoutes();
-    document.querySelector('#viewer-content').innerHTML = `<p>${data.routes.length} routes · ${data.files.length} files. Select a route to inspect variations and trips, or select a raw table.</p><p><a href="/file-viewer/" target="_blank" rel="noopener">Open advanced GTFS file viewer and issue highlights</a> — load a ZIP directly from your device.</p>`;
+    document.querySelector('#viewer-content').innerHTML = `<p>${data.routes.length} routes · ${data.files.length} files</p>`;
   } catch (error) { document.querySelector('#viewer-content').textContent = error.message; }
 }
 
@@ -181,52 +183,11 @@ document.querySelector('#cache-refresh').addEventListener('click', () => refresh
 document.querySelector('#cache-clear').addEventListener('click', () => { if (confirm('Remove unused saved indexes? Your original ZIPs and indexes used by active runs are kept.')) refreshCache(true); });
 refreshCache();
 
-function renderFinalValidation(payload) {
-  document.querySelector('#index-summary').textContent = (payload.index_status || []).map(item => `${item.source}: ${item.status}${item.warning ? ' — '+item.warning : ''}`).join(' · ') + ' · ' + (payload.audit_cache_status || '');
-  const target = document.querySelector('#final-content');
-  const validation = payload.final_validation;
-  if (!validation) { target.textContent = 'Final merged GTFS: Not supplied. Inspect each supplied export in Individual feeds.'; return; }
-  const counts = data => Object.entries(data.counts || {}).map(([key,value]) => `${value} ${key.toLowerCase()}`).join(' · ');
-  const state = (title, data) => `<h3>${title}</h3><p>${escapeHtml(data.status)} · ${escapeHtml(counts(data))}</p>${data.message ? `<pre>${escapeHtml(data.message)}</pre>` : ''}`;
-  const rowButton = (file,row,field='') => file && Number.isInteger(Number(row)) && Number(row)>=2 ? ` <button class="final-evidence" data-file="${escapeHtml(file)}" data-row="${row}" data-field="${escapeHtml(field)}">Inspect ${escapeHtml(file)} CSV row ${row}</button>` : '';
-  const evidence = (file, item) => `<li>${escapeHtml(item.message)}${rowButton(file,item.row,item.field)}</li>`;
-  const mobilityEvidence = item => (item.sampleNotices || []).map(sample => {
-    const knownFiles = {feed_expiration_date30_days:'feed_info.txt',missing_feed_contact_email_and_url:'feed_info.txt',platform_without_parent_station:'stops.txt',decreasing_or_equal_stop_time_distance:'stop_times.txt'};
-    const file = sample.filename || knownFiles[item.code];
-    return `<details><summary>Sample evidence</summary><pre>${escapeHtml(JSON.stringify(sample,null,2))}</pre>${rowButton(file,sample.csvRowNumber,sample.fieldName)}${rowButton('trips.txt',sample.tripCsvRowNumber)}${rowButton('stop_times.txt',sample.stopTimeCsvRowNumber)}</details>`;
-  }).join('');
-  target.innerHTML = `<p>Final-feed checks are independent of source comparisons. Agency-profile expectations are not universal GTFS requirements. Skipped or unavailable engines are not passes.</p><a href="/api/runs/${payload.id}/final-validation.json" download>Download final validation evidence (JSON)</a>`
-    + state('GTFS technical checks', validation.technical)
-    + `<details><summary>View technical findings</summary><ul>${(validation.technical.findings || []).map(item => `<li>${escapeHtml(item.rule_id)} · ${escapeHtml(item.message)}${rowButton(item.file,item.row)}</li>`).join('')}</ul></details>`
-    + state('Your agency validation profile', validation.agency)
-    + (validation.agency.files || []).map(file => `<details class="validation-file"><summary>${escapeHtml(file.file)} · ${escapeHtml(file.status)} · ${escapeHtml(counts(file))}</summary>${['errors','warnings','info'].map(key => `<h4>${key} (${file.counts[key]})</h4><ul>${file[key].map(item => evidence(file.file,item)).join('')}</ul>${file.counts[key] > file[key].length ? '<p>Showing the first 250 examples. Counts include all findings.</p>' : ''}`).join('')}</details>`).join('')
-    + state('MobilityData canonical validator (local)', validation.mobility)
-    + (validation.mobility.status === 'complete' ? `<a href="/api/runs/${payload.id}/mobility-report.html" download>Download MobilityData HTML report</a>` : '')
-    + (validation.mobility.notices || []).map(item => `<details class="validation-file"><summary>${escapeHtml(item.severity)} · ${escapeHtml(item.code)} · ${item.totalNotices} occurrences</summary><p>Sample evidence supplied by MobilityData:</p>${mobilityEvidence(item)}</details>`).join('');
-  target.querySelectorAll('.final-evidence').forEach(button => button.addEventListener('click', async () => {
-    document.querySelector('#viewer-source').value = 'final';
-    await loadViewer();
-    document.querySelector('.workspace-tab[data-view="viewer"]').click();
-    document.querySelector('#viewer-table').value = button.dataset.file;
-    const record = Number(button.dataset.row)-2;
-    const offset = Math.max(0, Math.floor(record/100)*100);
-    await openViewerTable(offset);
-    const row = document.querySelectorAll('#viewer-content tbody tr')[record-offset];
-    if (row) {
-      row.classList.add('evidence-row');
-      const headers = [...document.querySelectorAll('#viewer-content th')];
-      const fieldIndex = headers.findIndex(header => header.textContent === button.dataset.field);
-      if (fieldIndex >= 0) row.children[fieldIndex].classList.add('evidence-field');
-      row.scrollIntoView({block:'center'});
-    }
-  }));
-}
-
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   runButton.disabled = true;
   runningPanel.classList.remove('hidden');
-  document.querySelector('#run-progress').textContent = 'Validating ZIPs and comparing exports…';
+  updateRunProgress({progress:'Preparing files…',progress_percent:0,elapsed_seconds:0});
   results.classList.add('hidden');
   selected.clear();
   try {
@@ -260,13 +221,17 @@ form.addEventListener('submit', async (event) => {
 
 async function poll(id) {
   while (true) {
-    const response = await fetch(`/api/runs/${id}`, {cache: 'no-store'});
+    const response = await fetch(`/api/runs/${id}?summary=1`, {cache: 'no-store'});
     const payload = await response.json();
-    document.querySelector('#run-progress').textContent = payload.progress || 'Audit in progress…';
+    updateRunProgress(payload);
     if (payload.status === 'complete') {
+      const fullResponse = await fetch(`/api/runs/${id}`, {cache:'no-store'});
+      if (!fullResponse.ok) throw new Error('Could not load validation results');
+      const complete = await fullResponse.json();
+      Object.assign(payload, complete);
       runningPanel.classList.add('hidden');
       renderReport(payload.report, id);
-      document.querySelector('#run-cache-status').textContent = payload.audit_cache_status || '';
+      document.querySelector('#run-cache-status').textContent = payload.audit_cache_status?.startsWith('Reused') ? 'Saved results reused' : '';
       renderFinalValidation(payload);
       refreshCache();
       return;
@@ -287,14 +252,17 @@ function renderReport(report, id) {
   const strip = document.querySelector('#decision-strip');
   strip.className = 'decision-strip ' + (report.decision === 'BLOCKED' ? 'blocked' : report.decision.startsWith('ELIGIBLE') ? 'approved' : '');
   const sourceOnly=report.stats?.workflow?.final==='not_supplied';
-  document.querySelector('#decision-strip .eyebrow').textContent=sourceOnly ? 'Inspection result' : 'Release decision';
+  document.querySelector('#decision-strip .eyebrow').textContent='Result';
   document.querySelector('#decision').textContent = sourceOnly && report.decision.startsWith('ELIGIBLE') ? 'NO BLOCKING FINDINGS' : report.decision;
-  document.querySelector('#source-name').textContent = report.source_path;
-  document.querySelector('#hash').textContent = report.sha256 ? `Final SHA-256 ${report.sha256}` : 'Source archive hashes recorded in the exported report';
+  document.querySelector('#source-name').textContent = Object.values(report.stats?.individual_feeds || {}).map(feed => `${feed.label}: ${feed.path.split(/[\\/]/).pop()}`).join(' · ');
+  document.querySelector('#setup-panel').classList.add('collapsed');
+  document.querySelector('#toggle-files').classList.remove('hidden');
+  document.querySelector('#toggle-files').textContent = 'Change files';
+  document.querySelector('#hash').textContent = '';
   document.querySelector('#csv-link').href = `/api/runs/${id}/findings.csv`;
   document.querySelector('#json-link').href = `/api/runs/${id}/report.json`;
   const counts = report.counts;
-  document.querySelector('#metrics').innerHTML = ['blocker','error','warning','info'].map(level => `<div class="metric ${level}"><strong>${counts[level] || 0}</strong><span>${level}${(counts[level] || 0) === 1 ? '' : 's'}</span></div>`).join('');
+  document.querySelector('#metrics').innerHTML = ['blocker','error','warning','info'].map(level => `<button type="button" class="metric ${level}" data-finding-level="${level}"><strong>${counts[level] || 0}</strong><span>${level}${(counts[level] || 0) === 1 ? '' : 's'}</span></button>`).join('');
   activeFindings = report.findings.map((finding, index) => ({...finding, _index: index}));
   const categories = [...new Set(activeFindings.map(f => f.category))].sort();
   categoryFilter.innerHTML = '<option value="">All categories</option>' + categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
@@ -450,6 +418,7 @@ async function selectVariation(route, pair) {
 function renderIssueGroups() {
   const groups = new Map();
   for (const finding of activeFindings) {
+    if (finding.rule_id.startsWith('PKG')) continue;
     if (!matchesFindingPresence(finding) || !matchesSequenceFilter(finding.context?.mismatch_positions) || (activeRoute && String(finding.context?.route_short_name || '') !== activeRoute)) continue;
     const current = groups.get(finding.rule_id) || {rule: finding.rule_id, title: finding.title, count: 0, severity: finding.severity};
     current.count += 1;
@@ -470,6 +439,7 @@ function getFilteredFindings() {
   const severity = severityFilter.value;
   const category = categoryFilter.value;
   return activeFindings.filter(f => {
+    if (f.rule_id.startsWith('PKG')) return false;
     const route = String(f.context?.route_short_name || '');
     const variationKeys = [
       ...(f.context?.clevercad_variation_ids || [f.context?.clevercad_variation_id]).filter(Boolean).map(value => `CAD|${value}`),
@@ -491,12 +461,17 @@ function previewValues(finding) {
 
 function renderFindings() {
   filteredFindings = getFilteredFindings();
-  const visible = filteredFindings.slice(0, pageLimit);
-  document.querySelector('#result-count').textContent = `${Math.min(pageLimit, filteredFindings.length)} shown · ${filteredFindings.length} matching · ${activeFindings.length} total`;
+  const filterKey = [search.value,severityFilter.value,categoryFilter.value,activeRule,activeRoute,activeVariation,sequenceFilter.value].join('|');
+  if (filterKey !== findingsFilterKey) { findingsPage = 0; findingsFilterKey = filterKey; }
+  findingsPage = Math.max(0, Math.min(findingsPage, Math.ceil(filteredFindings.length/25)-1));
+  const visible = filteredFindings.slice(findingsPage*25, findingsPage*25+25);
+  document.querySelector('#findings-prev').disabled = findingsPage === 0;
+  document.querySelector('#findings-page').textContent = `${filteredFindings.length ? findingsPage*25+1 : 0}–${Math.min((findingsPage+1)*25,filteredFindings.length)} of ${filteredFindings.length}`;
+  document.querySelector('#result-count').textContent = `${visible.length} shown · ${filteredFindings.length} matching`;
   document.querySelector('#empty-state').classList.toggle('hidden', filteredFindings.length !== 0);
   const loadMore = document.querySelector('#load-more');
-  loadMore.classList.toggle('hidden', visible.length >= filteredFindings.length);
-  loadMore.textContent = `Show ${Math.min(100, filteredFindings.length - visible.length)} more`;
+  loadMore.classList.toggle('hidden', (findingsPage+1)*25 >= filteredFindings.length);
+  loadMore.textContent = 'Next';
   list.innerHTML = visible.map(f => {
     if (f.rule_id === 'FINAL001') return `<article class="finding-card"><input class="finding-select" type="checkbox" aria-label="Select finding ${escapeHtml(f.rule_id)}" data-index="${f._index}" ${selected.has(f._index) ? 'checked' : ''}><button type="button" class="finding-open" data-index="${f._index}"><span class="pill ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span><h4>${escapeHtml(f.title)}</h4><p>${escapeHtml(f.message)}</p><span>Open Final GTFS validation →</span></button></article>`;
     const [left, right] = previewValues(f);
@@ -598,29 +573,22 @@ function renderInventory(report) {
 }
 
 function renderPackaging(report) {
-  const files = Object.entries(report.files);
-  document.querySelector('#packaging').innerHTML = report.stats?.workflow?.final === 'not_supplied' || ['oc-transpo-source-preflight','rail-source-preflight','source-preflight'].includes(report.profile)
-    ? '<div class="package-row"><span>Final merged GTFS</span><strong>Not supplied</strong></div><p class="field-help">Final artifact and permission checks were skipped. Add the merged ZIP after the vendor produces it.</p>'
-    : `<div class="package-row"><span>Final archive size</span><strong>${formatBytes(report.archive_size)}</strong></div><div class="package-row"><span>Members inspected</span><strong>${files.length}</strong></div><div class="package-row"><span>Members stored as 0644</span><strong>${files.filter(([,v]) => v.stored_mode === '644').length} / ${files.length}</strong></div><div class="package-row"><span>System extraction tested</span><strong>${report.stats.extracted_permissions ? 'Yes' : 'Unavailable'}</strong></div>`;
+  const feeds = report.stats?.individual_feeds || {};
+  document.querySelector('#packaging-source').innerHTML = Object.keys(feeds).map(source => `<option value="${source}">${escapeHtml(inspectionLabels[source])}</option>`).join('');
+  document.querySelector('#packaging').textContent = 'Select Packaging to inspect the ZIP.';
 }
 
 async function openDetail(index) {
   const finding = activeFindings.find(item => item._index === index);
   if (!finding) return;
   if (finding.context?.inspection_source) {
-    document.querySelector('.workspace-tab[data-view="inspection"]').click();
-    inspectionSource=finding.context.inspection_source;
-    document.querySelector('#inspection-section').value=finding.rule_id==='INS020' || finding.rule_id==='INS021' ? 'comparison' : 'findings';
-    renderInspection();
-    if (Number.isInteger(finding.context.inspection_finding_index))openInspectionFinding(finding.context.inspection_finding_index);
+    const source=finding.context.inspection_source;
+    const original=inspectionData[source]?.validation?.findings[finding.context.inspection_finding_index] || finding;
+    openValidationEvidence({...original,source,title:original.title},document.activeElement);
     return;
   }
   if (finding.rule_id.startsWith('RAIL')) {
-    document.querySelector('.workspace-tab[data-view="rail"]').click();
-    const route = railData.routes.find(item => item.route_short_name === finding.context?.route_short_name);
-    if (route) openRailRoute(route);
-    else renderRail(railData);
-    document.querySelector('#rail-view').scrollIntoView({block:'start'});
+    openValidationEvidence({...finding,source:'rail'},document.activeElement);
     return;
   }
   if (finding.rule_id === 'FINAL001') {
@@ -812,7 +780,8 @@ function downloadStopRows(rows) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-document.querySelector('#load-more').addEventListener('click', () => { pageLimit += 100; renderFindings(); });
+document.querySelector('#load-more').addEventListener('click', () => { findingsPage++; renderFindings(); });
+document.querySelector('#findings-prev').addEventListener('click', () => { findingsPage--; renderFindings(); });
 document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); renderFindings(); });
 document.querySelector('#clear-route').addEventListener('click', () => { activeRoute = ''; activeVariation = ''; activeVariationFilters = []; renderRouteHealth(routeHealthData); renderFindings(); });
 document.querySelector('#clear-variation').addEventListener('click', () => { activeVariation = ''; activeVariationFilters = []; document.querySelector('#variation-detail').innerHTML = '<p class="variation-prompt">Choose a variation tab to compare its representative CleverCAD and HASTUS stop patterns.</p>'; renderRouteHealth(routeHealthData); renderFindings(); });
@@ -843,7 +812,9 @@ document.querySelectorAll('.workspace-tab').forEach(tab => tab.addEventListener(
   document.querySelector('#rail-view').classList.toggle('hidden', tab.dataset.view !== 'rail');
   document.querySelector('#inspection-view').classList.toggle('hidden',tab.dataset.view!=='inspection');
   for (const missing of ['cad','hastus']) document.querySelector(`#missing-${missing}-view`).classList.toggle('hidden', tab.dataset.view !== `missing-${missing}`);
-  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view.startsWith('missing-') || ['inspection','schedule','headways'].includes(tab.dataset.view));
+  document.querySelector('#investigation-panel').classList.toggle('hidden',tab.dataset.view !== 'findings');
+  document.querySelector('#packaging-view').classList.toggle('hidden',tab.dataset.view !== 'packaging');
+  if (tab.dataset.view === 'packaging') loadPackaging();
 }));
 stopMappingSearch.addEventListener('input', () => { stopMappingLimit = 80; renderStopMappingRows(); });
 stopMappingFilter.addEventListener('change', () => { stopMappingLimit = 80; renderStopMappingRows(); });
