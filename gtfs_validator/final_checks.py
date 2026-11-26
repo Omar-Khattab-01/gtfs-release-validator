@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 from .feed_index import get_index
 from .java_runtime import find_java
+from .rail import _services
 
 PACKAGE = Path(__file__).resolve().parent
 DEFAULT_JAR = PACKAGE.parent / ".local-tools" / "gtfs-validator-cli.jar"
@@ -45,6 +46,28 @@ class EvidenceList(list):
             super().append(value)
 
 
+def calendar_service_coverage(index, validation_date):
+    """Count dates with scheduled trips, after weekday flags and exceptions."""
+    services, _ = _services(index, None)
+    used = {row.get('service_id', '').strip() for row in index.small_tables.get('trips.txt', [])}
+    days = set().union(*(values for service, values in services.items() if service in used))
+    if not days:
+        return {'service_days': 0, 'first_date': None, 'last_date': None, 'span_days': 0,
+                'remaining_service_days': 0}, 'No scheduled trip service remains after applying weekday flags and calendar_dates.txt exceptions.'
+    first, last = min(days), max(days)
+    first_date, last_date = date.fromisoformat(first), date.fromisoformat(last)
+    remaining = sum(day >= validation_date.isoformat() for day in days)
+    coverage = {'first_date': first, 'last_date': last, 'service_days': len(days),
+                'span_days': (last_date-first_date).days + 1, 'remaining_service_days': remaining,
+                'start_offset_days': (first_date-validation_date).days}
+    offset = coverage['start_offset_days']
+    timing = ('starts tomorrow' if offset == 1 else f'starts in {offset} days') if offset > 0 else (
+        'starts today' if offset == 0 else 'started yesterday' if offset == -1 else f'started {-offset} days ago')
+    return coverage, (f"First scheduled service {timing}. Scheduled trips after weekday flags and calendar_dates.txt exceptions: {first} to {last}; "
+                      f"{len(days)} days with service within a {coverage['span_days']}-day span; "
+                      f"{remaining} service days remain on or after validation date {validation_date.isoformat()}.")
+
+
 def agency_checks(path: str, validation_date: str, release_policy: bool = True, reference: str = "") -> dict:
     try:
         import pandas as pd
@@ -55,6 +78,7 @@ def agency_checks(path: str, validation_date: str, release_policy: bool = True, 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     selected_date = date.fromisoformat(validation_date)
+    # release_policy remains accepted for older clients; fixed weekday/month rules are retired.
 
     class RunDate(date):
         @classmethod
@@ -62,9 +86,6 @@ def agency_checks(path: str, validation_date: str, release_policy: bool = True, 
             return selected_date
 
     module.date = RunDate
-    if not release_policy:
-        module.validate_feed_dates = lambda *args: None
-        module.validate_calendar_start_and_end_dates = lambda *args: None
     reference_path = Path(reference) if reference else PACKAGE / "routes_sort_order_list.csv"
     module.load_routes_sort_order_reference = lambda folder, result: pd.read_csv(reference_path, dtype=str, encoding="utf-8-sig", keep_default_na=False)
     module.new_result = lambda name: {"file": name, "status": "PASS", **{key: EvidenceList() for key in ("errors", "warnings", "info")}}
@@ -106,6 +127,15 @@ def agency_checks(path: str, validation_date: str, release_policy: bool = True, 
             if not seen_chunk or offset == 0:
                 combined["errors"].append({"message": "GTFS table is empty", "row": None, "field": ""})
                 combined["counts"]["errors"] += 1
+        if name == 'calendar':
+            try:
+                coverage, message = calendar_service_coverage(index, selected_date)
+                combined['coverage'] = coverage
+                level = 'info' if coverage['remaining_service_days'] else 'warnings'
+            except ValueError as exc:
+                level, message = 'warnings', f'Could not summarize scheduled service coverage: {exc}'
+            combined[level].append({'message': message, 'row': None, 'field': ''})
+            combined['counts'][level] += 1
         combined["status"] = "FAIL" if combined["counts"]["errors"] else "PASS WITH WARNINGS" if combined["counts"]["warnings"] else "PASS"
         results.append(combined)
     counts = {key: sum(item["counts"][key] for item in results) for key in ("errors", "warnings", "info")}

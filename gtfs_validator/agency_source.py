@@ -1,8 +1,7 @@
 from pathlib import Path
 import sys
 import re
-import calendar
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import pandas as pd
 from zoneinfo import available_timezones
@@ -691,33 +690,45 @@ def validate_feed_info_formats(df: pd.DataFrame, headers: list[str], result: dic
     validate_yyyymmdd_column(df, headers, result, "feed_info.txt", "feed_end_date", warning_only=False)
 
 
+def summarize_date_range(df: pd.DataFrame, headers: list[str], result: dict,
+                         start_column: str, end_column: str, label: str) -> None:
+    if start_column not in headers or end_column not in headers:
+        return
+    starts, ends = [], []
+    for index, row in df.iterrows():
+        if not all(re.fullmatch(r"[0-9]{8}", str(row[column]).strip()) for column in (start_column, end_column)):
+            continue
+        try:
+            start = datetime.strptime(str(row[start_column]).strip(), "%Y%m%d").date()
+            end = datetime.strptime(str(row[end_column]).strip(), "%Y%m%d").date()
+        except ValueError:
+            continue  # Format errors are already reported by the column checks.
+        if start > end:
+            add_error(result, f"{label}: {start_column} {start.isoformat()} is after {end_column} "
+                      f"{end.isoformat()}, row {index + 2}.")
+            continue
+        starts.append(start)
+        ends.append(end)
+    if not starts:
+        return
+    start, end, today = min(starts), max(ends), date.today()
+    offset = (start - today).days
+    timing = ('starts tomorrow' if offset == 1 else f'starts in {offset} days') if offset > 0 else (
+        'starts today' if offset == 0 else 'started yesterday' if offset == -1 else f'started {-offset} days ago')
+    message = (f"{label} export {timing}, relative to validation date {today.isoformat()}. "
+               f"Declared coverage: {start.isoformat()} to {end.isoformat()}, "
+               f"{(end-start).days + 1} calendar days inclusive.")
+    result['warnings' if offset > 0 else 'info'].append(message)
+    if end < today:
+        result['warnings'].append(f"{label} export ended {(today-end).days} days ago on {end.isoformat()}; "
+                                  'no declared coverage remains on the validation date.')
+    else:
+        result['info'].append(f"{label} remaining declared coverage from the validation date: "
+                              f"{(end-max(start,today)).days + 1} calendar days inclusive.")
+
+
 def validate_feed_dates(df: pd.DataFrame, headers: list[str], result: dict) -> None:
-    expected_start_date = get_upcoming_friday(date.today())
-    expected_start = expected_start_date.strftime("%Y%m%d")
-
-    expected_end_date = add_one_month(expected_start_date)
-    expected_end = expected_end_date.strftime("%Y%m%d")
-
-    result["info"].append(f"feed_info.txt expected feed_start_date based on upcoming Friday: {expected_start}")
-    result["info"].append(f"feed_info.txt expected feed_end_date based on one month after feed_start_date: {expected_end}")
-
-    if "feed_start_date" in headers:
-        actual = str(df.loc[0, "feed_start_date"]).strip()
-
-        if actual != expected_start:
-            add_error(
-                result,
-                f"feed_start_date is not the correct upcoming Friday. Current value: {actual}. Expected value: {expected_start}."
-            )
-
-    if "feed_end_date" in headers:
-        actual = str(df.loc[0, "feed_end_date"]).strip()
-
-        if actual != expected_end:
-            add_error(
-                result,
-                f"feed_end_date is not one month from the expected feed_start_date. Current value: {actual}. Expected value: {expected_end}."
-            )
+    summarize_date_range(df, headers, result, 'feed_start_date', 'feed_end_date', 'feed_info.txt')
 
 
 def highlight_feed_version(df: pd.DataFrame, headers: list[str], result: dict) -> None:
@@ -749,40 +760,7 @@ def validate_calendar_day_values(df: pd.DataFrame, headers: list[str], result: d
 
 
 def validate_calendar_start_and_end_dates(df: pd.DataFrame, headers: list[str], result: dict) -> None:
-    expected_start_date = get_upcoming_friday(date.today())
-    expected_start = expected_start_date.strftime("%Y%m%d")
-
-    expected_end_date = add_one_month(expected_start_date)
-    expected_end = expected_end_date.strftime("%Y%m%d")
-
-    result["info"].append(f"calendar.txt expected start_date based on upcoming Friday: {expected_start}")
-    result["info"].append(f"calendar.txt expected end_date based on one month after start_date: {expected_end}")
-
-    if "start_date" in headers:
-        for index, value in df["start_date"].items():
-            if is_blank(value):
-                continue
-
-            actual = str(value).strip()
-
-            if actual != expected_start:
-                result["warnings"].append(
-                    f"calendar.txt start_date warning: service_id {get_row_id(df, index, 'service_id')}, "
-                    f"current value {actual}, expected {expected_start}"
-                )
-
-    if "end_date" in headers:
-        for index, value in df["end_date"].items():
-            if is_blank(value):
-                continue
-
-            actual = str(value).strip()
-
-            if actual != expected_end:
-                result["warnings"].append(
-                    f"calendar.txt end_date warning: service_id {get_row_id(df, index, 'service_id')}, "
-                    f"current value {actual}, expected {expected_end}"
-                )
+    summarize_date_range(df, headers, result, 'start_date', 'end_date', 'calendar.txt')
 
 
 # =============================================================================
@@ -1868,28 +1846,6 @@ def get_row_id(df: pd.DataFrame, row_index: int, id_column: str | None) -> str:
         return value
 
     return f"row {row_index + 2}"
-
-
-def get_upcoming_friday(today: date) -> date:
-    days_until_friday = (4 - today.weekday()) % 7
-    return today + timedelta(days=days_until_friday)
-
-
-def add_one_month(input_date: date) -> date:
-    year = input_date.year
-    month = input_date.month + 1
-    day = input_date.day
-
-    if month == 13:
-        month = 1
-        year += 1
-
-    last_day_of_target_month = calendar.monthrange(year, month)[1]
-
-    if day > last_day_of_target_month:
-        day = last_day_of_target_month
-
-    return date(year, month, day)
 
 
 # =============================================================================

@@ -11,7 +11,7 @@
   <header class="masthead">
     <div class="brand-mark" aria-hidden="true"><span>OC</span></div>
     <div>
-      <p class="eyebrow">Release assurance · local device · Version 0.17.2</p>
+      <p class="eyebrow">Release assurance · local device · Version 0.17.3</p>
       <h1>GTFS Merge Auditor</h1>
     </div>
     <div class="privacy-badge"><span class="status-dot"></span> Offline processing</div>
@@ -49,7 +49,6 @@
           <label><input type="checkbox" id="force-revalidate"> Run fresh validation and fully verify saved-file fingerprints</label>
           <label><input type="checkbox" id="run-agency" checked> Run my agency checks on the final GTFS</label>
           <label><input type="checkbox" id="run-mobility" checked> Run MobilityData locally on the final GTFS (Java 17+ and CLI JAR required)</label>
-          <label><input type="checkbox" id="release-policy" checked> Enforce Friday release / one-month coverage policy</label>
           <label>Validation date <input type="date" id="validation-date" required></label>
           <label>MobilityData CLI JAR path <input id="mobility-jar" type="text" placeholder="Optional; otherwise use setup_mobilitydata.bat"></label>
           <label>Route-sort reference CSV <input id="sort-reference" type="text" placeholder="Optional override; your supplied reference is bundled"></label>
@@ -244,7 +243,7 @@
     <div class="drawer-header"><div><p class="eyebrow">Local storage</p><h2 id="cache-dialog-title">Saved exports &amp; indexes</h2></div><button type="button" id="cache-dialog-close" class="close-button" aria-label="Close saved exports">×</button></div>
     <div class="cache-dialog-body"><p>Offloading removes the saved browsing index and related audits. Opening that export again rebuilds its index.</p><p id="cache-manager-status" role="status"></p><div id="cache-feed-list"></div><button type="button" id="cache-offload-all" class="button secondary">Offload all saved data</button></div>
   </dialog>
-  <footer><span>GTFS Merge Auditor 0.17.2</span><span>Bound to localhost · no network services</span></footer>
+  <footer><span>GTFS Merge Auditor 0.17.3</span><span>Bound to localhost · no network services</span></footer>
   <script src="/assets/app.js" defer></script>
   <script src="/assets/missing-reports.js" defer></script>
   <script src="/assets/inspection.js" defer></script>

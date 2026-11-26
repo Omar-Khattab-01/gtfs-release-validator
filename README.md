@@ -24,7 +24,7 @@ The application brings together individual feed inspection, CleverCAD and HASTUS
 - **Saved exports** reopens indexed paths and matching audits. Use **Manage saved exports** to offload an individual feed's index and related audits or all saved cache data.
 - **Source comparison:** Investigate bus variations and stop mappings with both source records available for context.
 - **Rail review:** Follow rail routes, trips, service calendars, and differences against the final feed.
-- **Final validation:** Keep technical findings, agency expectations, and canonical validator results distinct.
+- **Final validation:** Keep technical findings, agency expectations, and canonical validator results distinct. Calendar checks summarize start timing relative to the selected validation date, inclusive coverage length, and scheduled service days after calendar exceptions. Future and expired exports are flagged; no Friday start or fixed one-month duration is imposed.
 
 The application also includes my [GTFS Viewer](https://github.com/Omar-Khattab-01/gtfs-viewer) for reading feed files with coloured columns and issue highlights.
 

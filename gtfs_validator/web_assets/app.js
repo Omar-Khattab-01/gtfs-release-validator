@@ -242,7 +242,6 @@ form.addEventListener('submit', async (event) => {
         force_revalidate: document.querySelector('#force-revalidate').checked,
         run_agency: document.querySelector('#run-agency').checked,
         run_mobility: document.querySelector('#run-mobility').checked,
-        release_policy: document.querySelector('#release-policy').checked,
         validation_date: document.querySelector('#validation-date').value,
         mobility_jar: document.querySelector('#mobility-jar').value.trim(),
         sort_reference: document.querySelector('#sort-reference').value.trim()
